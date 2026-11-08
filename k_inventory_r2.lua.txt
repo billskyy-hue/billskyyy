@@ -1494,6 +1494,7 @@ local function findRefs()
     local previousSource = Refs.InvSource
     local inventoryRoots = {}
     Refs.World, Refs.Inv, Refs.SetTile, Refs.State, Refs.Punch, Refs.Menu = nil, nil, nil, nil, nil, nil
+    Refs.StateOwner = nil
     Refs.InvSource = nil
     Refs.Gems = nil
     Refs.Hud = nil
@@ -1522,7 +1523,7 @@ local function findRefs()
             end
             if not Refs.State then
                 local ok, isHolder = pcall(isStateHolder, v)
-                if ok and isHolder then Refs.State = rawget(v, "state") end
+                if ok and isHolder then Refs.State, Refs.StateOwner = rawget(v, "state"), v end
             end
             if not Refs.Menu then
                 local ok, isMenu = pcall(function()
@@ -7917,7 +7918,7 @@ do (function()
         local ok, open = pcall(Auto.tileOpen, px, py)
         if not ok or not open then return nil, "Tile tujuan terhalang block atau berbahaya. Pilih tile kosong." end
         return { tx = x, ty = y, px = px, py = py, x = px + 0.5, y = py + 0.95,
-            world = w, worldName = rawget(w, "name"), getter = Refs.State }
+            world = w, worldName = rawget(w, "name"), getter = Refs.State, owner = Refs.StateOwner }
     end
     function TP.capture()
         if TP.Busy then return false, "Teleport masih berjalan." end
@@ -7933,14 +7934,15 @@ do (function()
     local function sameWorld(target)
         return Refs.World == target.world and Refs.State == target.getter
             and rawget(target.world, "name") == target.worldName
+            and (not target.owner or target.owner == Refs.StateOwner)
     end
     -- Gunakan tabel posisi yang benar-benar memengaruhi getter game. Salinan state
     -- untuk UI tidak cukup: setiap percobaan diverifikasi dan dipulihkan jika gagal.
     function TP.apply(target, state)
         if not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
         local before = { x = state.x, y = state.y, vx = state.vx, vy = state.vy }
-        if equal(before.x, target.x) and equal(before.y, target.y) then return true end
-        local tables, functions, queue, seen = { state }, {}, { { value = target.getter, depth = 0 } }, {}
+        if equal(before.x, target.x) and equal(before.y, target.y) then TP.Method = "Sudah di tujuan"; return true end
+        local tables, functions, queue, seen = {}, {}, { { value = target.getter, depth = 0 } }, {}
         local cursor = 1
         local function push(value, depth)
             local kind = type(value)
@@ -7951,6 +7953,11 @@ do (function()
             queue[#queue + 1] = { value = value, depth = depth }
         end
         seen[target.getter] = true
+        -- state() dapat mengembalikan cache untuk gambar/UI. Fungsi lain pada
+        -- pemilik state memegang data fisika yang memperbarui cache tersebut.
+        if type(target.owner) == "table" and rawget(target.owner, "state") == target.getter then
+            push(target.owner, 0)
+        end
         while cursor <= #queue do
             local entry = queue[cursor]
             cursor = cursor + 1
@@ -7961,7 +7968,7 @@ do (function()
                     for _, up in pairs(getUpvalues(value)) do push(up, entry.depth + 1) end
                 end
             else
-                if equal(rawget(value, "x"), before.x) and equal(rawget(value, "y"), before.y) then
+                if value ~= state and equal(rawget(value, "x"), before.x) and equal(rawget(value, "y"), before.y) then
                     tables[#tables + 1] = value
                 end
                 if entry.depth < 4 then
@@ -7977,11 +7984,31 @@ do (function()
                 end
             end
         end
+        -- Utamakan data internal; jangan memilih cache hasil pembacaan lebih dulu.
+        tables[#tables + 1] = state
         local function arrived()
             local s = sample()
             return s and equal(s.x, target.x) and equal(s.y, target.y)
         end
+        local function frame()
+            task.wait()
+            if not alive() or not sameWorld(target) then return nil, "World / sesi berubah setelah perpindahan." end
+            local s, why = sample()
+            return s, why
+        end
+        local function confirmed()
+            for _ = 1, 2 do
+                local s, why = frame()
+                if not s then return false, why end
+                if math.floor(s.x) == target.px and math.floor(s.y - 0.475) == target.py then return true end
+            end
+            return false, "Posisi bergerak / dikembalikan lagi setelah teleport."
+        end
+        local lostPosition = false
+        local tableAttempts = 0
         for _, value in ipairs(tables) do
+            tableAttempts = tableAttempts + 1
+            if tableAttempts > 6 then break end
             if not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
             local old = { x = rawget(value, "x"), y = rawget(value, "y"), vx = rawget(value, "vx"), vy = rawget(value, "vy") }
             if finite(old.x) and finite(old.y) then
@@ -7992,7 +8019,13 @@ do (function()
                     if finite(old.vx) then rawset(value, "vx", 0); written = written + 1 end
                     if finite(old.vy) then rawset(value, "vy", 0); written = written + 1 end
                 end)
-                if ok and arrived() then return true end
+                local immediate = ok and arrived()
+                if ok and (immediate or value ~= state) then
+                    local holds, why = confirmed()
+                    if holds then TP.Method = "Tabel posisi terkonfirmasi setelah frame game"; return true end
+                    if not alive() or not sameWorld(target) then return false, why end
+                    lostPosition = lostPosition or immediate
+                end
                 if written > 0 then
                     local restored = pcall(function()
                         for _, key in ipairs({ "x", "y", "vx", "vy" }) do rawset(value, key, old[key]) end
@@ -8001,21 +8034,28 @@ do (function()
                 end
             end
         end
-        -- Sebagian versi game menyimpan x/y sebagai upvalue angka. Cocokkan lewat
-        -- pembacaan getter, bukan menebak urutan upvalue. Probe tidak menunggu frame.
+        -- Sebagian versi game menyimpan x/y pada fungsi penggerak lain dan hanya
+        -- menyalinnya ke state() pada frame berikutnya. Probe kecil dibatasi jumlahnya.
         local set = (debug and debug.setupvalue) or setupvalue
         if type(set) ~= "function" then return false, "Executor tidak menyediakan penulisan posisi game." end
         -- Getter juga bisa membaca posisi dari Vector2 privat, bukan tabel x/y.
+        local vectorAttempts = 0
         if typeof and Vector2 and type(Vector2.new) == "function" then
             for _, fn in ipairs(functions) do
                 for index, old in pairs(getUpvalues(fn)) do
                     if type(index) == "number" and index >= 1 and index % 1 == 0 and typeof(old) == "Vector2"
-                        and equal(old.X, before.x) and equal(old.Y, before.y) then
+                        and equal(old.X, before.x) and equal(old.Y, before.y) and vectorAttempts < 6 then
+                        vectorAttempts = vectorAttempts + 1
                         if not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
                         local ok = pcall(set, fn, index, Vector2.new(target.x, target.y))
-                        if ok and arrived() then return true end
+                        if ok then
+                            local holds, why = confirmed()
+                            if holds then TP.Method = "Vector2 posisi terkonfirmasi setelah frame game"; return true end
+                            if not alive() or not sameWorld(target) then return false, why end
+                        end
                         local restored = pcall(set, fn, index, old)
-                        local after = sample()
+                        local after, frameError = frame()
+                        if not after then return false, frameError end
                         if not restored or getUpvalues(fn)[index] ~= old or not after
                             or not equal(after.x, before.x) or not equal(after.y, before.y) then
                             return false, "Posisi Vector2 tidak bisa dipulihkan; perpindahan dihentikan."
@@ -8024,13 +8064,19 @@ do (function()
                 end
             end
         end
+        local checks, delayed = 0, 0
+        local stationary = state.grounded ~= false and math.abs(before.vx or 0) <= 0.05 and math.abs(before.vy or 0) <= 0.05
         local function binding(field)
             if not finite(before[field]) then return nil end
             for _, fn in ipairs(functions) do
                 for index, old in pairs(getUpvalues(fn)) do
                     if type(index) == "number" and index >= 1 and index % 1 == 0 and equal(old, before[field]) then
+                        checks = checks + 1
+                        if checks > 128 then return nil end
                         if not sameWorld(target) then return nil, "World berubah; teleport dibatalkan." end
-                        local probe = old + 0.125
+                        local step = field == "y" and -0.25 or 0.125
+                        if field == "x" and old % 1 > 0.5 then step = -step end
+                        local probe = old + step
                         local ok = pcall(set, fn, index, probe)
                         local current = ok and sample() or nil
                         local matched = probe ~= old and current and equal(current[field], probe)
@@ -8039,12 +8085,36 @@ do (function()
                                 if other ~= field and finite(before[other]) and not equal(current[other], before[other]) then matched = false end
                             end
                         end
+                        local deferred = false
+                        if not matched and ok and stationary and (field == "x" or field == "y") and delayed < 12 then
+                            delayed, deferred = delayed + 1, true
+                            for _ = 1, 2 do
+                                local why
+                                current, why = frame()
+                                if not current then return nil, why end
+                                local other = field == "x" and "y" or "x"
+                                local tolerance = field == "x" and 0.04 or 0.08
+                                matched = math.abs(current[field] - probe) <= tolerance
+                                    and math.abs(current[field] - old) >= math.abs(step) / 2
+                                    and math.abs(current[other] - before[other]) <= 0.04
+                                if matched then break end
+                            end
+                        end
                         local restored = pcall(set, fn, index, old)
                         local after = sample()
+                        if deferred then
+                            for _ = 1, 2 do
+                                local why
+                                after, why = frame()
+                                if not after then return nil, why end
+                                if equal(after.x, before.x) and equal(after.y, before.y) then break end
+                            end
+                        end
                         restored = restored and equal(getUpvalues(fn)[index], old) and after ~= nil
                         if restored then
                             for _, key in ipairs({ "x", "y", "vx", "vy" }) do
-                                if finite(before[key]) and not equal(after[key], before[key]) then restored = false end
+                                if finite(before[key]) and (not deferred or key == "x" or key == "y")
+                                    and not equal(after[key], before[key]) then restored = false end
                             end
                         end
                         if not restored then return nil, "Upvalue posisi tidak bisa dipulihkan; perpindahan dihentikan." end
@@ -8057,7 +8127,12 @@ do (function()
         if whyX then return false, whyX end
         local by, whyY = binding("y")
         if whyY then return false, whyY end
-        if not bx or not by then return false, "Posisi game belum bisa ditulis oleh executor ini." end
+        if not bx or not by then
+            TP.Method = "Sumber posisi penggerak belum terkonfirmasi"
+            if lostPosition then return false, "Perubahan posisi tidak bertahan; sumber gerak belum bisa dipastikan." end
+            if not stationary then return false, "Berdiri diam di lantai dulu agar sumber posisi dapat diperiksa." end
+            return false, "Posisi game belum bisa ditulis oleh executor ini."
+        end
         local changes = { { bind = bx, value = target.x }, { bind = by, value = target.y } }
         for _, field in ipairs({ "vx", "vy" }) do
             local b, why = binding(field)
@@ -8068,12 +8143,16 @@ do (function()
         local ok = pcall(function()
             for _, change in ipairs(changes) do set(change.bind.fn, change.bind.index, change.value) end
         end)
-        if ok and arrived() then return true end
+        if ok then
+            local holds, why = confirmed()
+            if holds then TP.Method = "Posisi privat penggerak terkonfirmasi setelah frame game"; return true end
+            if not alive() or not sameWorld(target) then return false, why end
+        end
         for i = #changes, 1, -1 do
             local b = changes[i].bind
             pcall(set, b.fn, b.index, b.old)
         end
-        return false, "Perubahan posisi tidak terbaca oleh game."
+        return false, "Posisi bergerak / dikembalikan lagi setelah teleport."
     end
     function TP.run()
         if TP.Busy then return false, "Teleport masih berjalan." end
@@ -8087,6 +8166,7 @@ do (function()
             return false, TP.Status
         end
         TP.Busy = true
+        TP.Method = "Memeriksa sumber posisi"
         local ok, result, err = pcall(function()
             if not alive() or not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
             TP.Status = ("Memindahkan ke (%d,%d)..."):format(target.tx, target.ty)
@@ -8116,7 +8196,8 @@ do (function()
         local current = s and cx and (("(%d,%d)"):format(math.floor(s.x) + cx, math.floor(s.y - 0.475) + cy)) or "belum terbaca"
         return "World: " .. tostring(Refs.World and Refs.World.name or "-")
             .. "\nPosisi sekarang: " .. current .. "\nTujuan: (" .. tostring(TP.X) .. "," .. tostring(TP.Y) .. ")"
-            .. "\nTeleport r4: " .. TP.Status
+            .. "\nPemeriksaan: " .. tostring(TP.Method or "-")
+            .. "\nTeleport r5: " .. TP.Status
     end
 end)() end
 

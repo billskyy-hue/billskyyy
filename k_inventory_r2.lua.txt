@@ -7866,11 +7866,259 @@ Auto.startFarmer = startFarmer
 Auto.updateClearStatus = updateClearStatus
 Auto.updateFarmerStatus = updateFarmerStatus
 Auto.findTreeRefs = findTreeRefs
+Auto.tileOpen = openAt
 Auto.releaseInput = releaseInput
 Auto.BadEdge = BadEdge
 Auto.ClearFail = ClearFail
 Auto.resetReach = function() Reach = nil end
 end)() end -- do (gerak otomatis)
+
+---------------------------------------------------------------------
+-- TELEPORT KOORDINAT DALAM WORLD (posisi 2D game, bukan CFrame avatar)
+---------------------------------------------------------------------
+do (function()
+    local TP = { X = "", Y = "", Busy = false, Status = "Isi X dan Y, lalu tekan Teleport." }
+    Auto.Teleport = TP
+    local function finite(v)
+        return type(v) == "number" and v == v and math.abs(v) < math.huge
+    end
+    local function equal(a, b)
+        return finite(a) and finite(b) and math.abs(a - b) < 0.0001
+    end
+    local function sample()
+        if type(Refs.State) ~= "function" then return nil, "Posisi game belum ditemukan. Tekan Hubungkan ke game." end
+        local ok, s = pcall(Refs.State)
+        if not ok or type(s) ~= "table" or not finite(s.x) or not finite(s.y) then
+            return nil, "Posisi karakter belum terbaca."
+        end
+        if s.active == false or s.dead then return nil, "Karakter belum siap / sedang mati." end
+        return s
+    end
+    local function calibration()
+        local cx, cy = tonumber(State.CalibX or 0), tonumber(State.CalibY or 0)
+        if not finite(cx) or not finite(cy) or cx % 1 ~= 0 or cy % 1 ~= 0 then return nil end
+        return cx, cy
+    end
+    function TP.resolve(x, y)
+        local w = Refs.World
+        if type(w) ~= "table" or not finite(w.w) or not finite(w.h) or w.w <= 0 or w.h <= 0
+            or w.w % 1 ~= 0 or w.h % 1 ~= 0 then
+            return nil, "Masuk ke world dulu, lalu tekan Hubungkan ke game."
+        end
+        x, y = tonumber(x), tonumber(y)
+        if not finite(x) or not finite(y) or x % 1 ~= 0 or y % 1 ~= 0 then
+            return nil, "X dan Y harus berupa bilangan bulat."
+        end
+        local cx, cy = calibration()
+        if cx == nil then return nil, "Kalibrasi koordinat tidak valid." end
+        local px, py = x - cx, y - cy
+        if px < 0 or py < 0 or px >= w.w or py >= w.h then return nil, "Koordinat berada di luar world." end
+        if type(Auto.tileOpen) ~= "function" then return nil, "Pemeriksaan tile belum tersedia." end
+        local ok, open = pcall(Auto.tileOpen, px, py)
+        if not ok or not open then return nil, "Tile tujuan terhalang block atau berbahaya. Pilih tile kosong." end
+        return { tx = x, ty = y, px = px, py = py, x = px + 0.5, y = py + 0.95,
+            world = w, worldName = rawget(w, "name"), getter = Refs.State }
+    end
+    function TP.capture()
+        if TP.Busy then return false, "Teleport masih berjalan." end
+        if type(Refs.World) ~= "table" then TP.Status = "Masuk ke world dulu."; return false, TP.Status end
+        local s, why = sample()
+        if not s then TP.Status = why; return false, why end
+        local cx, cy = calibration()
+        if cx == nil then TP.Status = "Kalibrasi koordinat tidak valid."; return false, TP.Status end
+        TP.X, TP.Y = tostring(math.floor(s.x) + cx), tostring(math.floor(s.y - 0.475) + cy)
+        TP.Status = "Tujuan diisi dari posisi sekarang: (" .. TP.X .. "," .. TP.Y .. ")."
+        return true
+    end
+    local function sameWorld(target)
+        return Refs.World == target.world and Refs.State == target.getter
+            and rawget(target.world, "name") == target.worldName
+    end
+    -- Gunakan tabel posisi yang benar-benar memengaruhi getter game. Salinan state
+    -- untuk UI tidak cukup: setiap percobaan diverifikasi dan dipulihkan jika gagal.
+    function TP.apply(target, state)
+        if not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
+        local before = { x = state.x, y = state.y, vx = state.vx, vy = state.vy }
+        if equal(before.x, target.x) and equal(before.y, target.y) then return true end
+        local tables, functions, queue, seen = { state }, {}, { { value = target.getter, depth = 0 } }, {}
+        local cursor = 1
+        local function push(value, depth)
+            local kind = type(value)
+            if (kind ~= "table" and kind ~= "function") or seen[value] or #queue >= 80 then return end
+            if value == G or value == _G or value == Refs or value == UI or value == ItemDB
+                or value == Session or value == Net then return end
+            seen[value] = true
+            queue[#queue + 1] = { value = value, depth = depth }
+        end
+        seen[target.getter] = true
+        while cursor <= #queue do
+            local entry = queue[cursor]
+            cursor = cursor + 1
+            local value = entry.value
+            if type(value) == "function" then
+                functions[#functions + 1] = value
+                if entry.depth < 4 then
+                    for _, up in pairs(getUpvalues(value)) do push(up, entry.depth + 1) end
+                end
+            else
+                if equal(rawget(value, "x"), before.x) and equal(rawget(value, "y"), before.y) then
+                    tables[#tables + 1] = value
+                end
+                if entry.depth < 4 then
+                    for _, key in ipairs({ "state", "body", "physics", "player", "position", "data" }) do
+                        push(rawget(value, key), entry.depth + 1)
+                    end
+                    local n = 0
+                    for key, child in next, value do
+                        n = n + 1
+                        if n > 24 then break end
+                        if key ~= "_G" and key ~= "_ENV" then push(child, entry.depth + 1) end
+                    end
+                end
+            end
+        end
+        local function arrived()
+            local s = sample()
+            return s and equal(s.x, target.x) and equal(s.y, target.y)
+        end
+        for _, value in ipairs(tables) do
+            if not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
+            local old = { x = rawget(value, "x"), y = rawget(value, "y"), vx = rawget(value, "vx"), vy = rawget(value, "vy") }
+            if finite(old.x) and finite(old.y) then
+                local written = 0
+                local ok = pcall(function()
+                    rawset(value, "x", target.x); written = written + 1
+                    rawset(value, "y", target.y); written = written + 1
+                    if finite(old.vx) then rawset(value, "vx", 0); written = written + 1 end
+                    if finite(old.vy) then rawset(value, "vy", 0); written = written + 1 end
+                end)
+                if ok and arrived() then return true end
+                if written > 0 then
+                    local restored = pcall(function()
+                        for _, key in ipairs({ "x", "y", "vx", "vy" }) do rawset(value, key, old[key]) end
+                    end)
+                    if not restored then return false, "Data posisi terkunci; perpindahan dihentikan." end
+                end
+            end
+        end
+        -- Sebagian versi game menyimpan x/y sebagai upvalue angka. Cocokkan lewat
+        -- pembacaan getter, bukan menebak urutan upvalue. Probe tidak menunggu frame.
+        local set = (debug and debug.setupvalue) or setupvalue
+        if type(set) ~= "function" then return false, "Executor tidak menyediakan penulisan posisi game." end
+        -- Getter juga bisa membaca posisi dari Vector2 privat, bukan tabel x/y.
+        if typeof and Vector2 and type(Vector2.new) == "function" then
+            for _, fn in ipairs(functions) do
+                for index, old in pairs(getUpvalues(fn)) do
+                    if type(index) == "number" and index >= 1 and index % 1 == 0 and typeof(old) == "Vector2"
+                        and equal(old.X, before.x) and equal(old.Y, before.y) then
+                        if not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
+                        local ok = pcall(set, fn, index, Vector2.new(target.x, target.y))
+                        if ok and arrived() then return true end
+                        local restored = pcall(set, fn, index, old)
+                        local after = sample()
+                        if not restored or getUpvalues(fn)[index] ~= old or not after
+                            or not equal(after.x, before.x) or not equal(after.y, before.y) then
+                            return false, "Posisi Vector2 tidak bisa dipulihkan; perpindahan dihentikan."
+                        end
+                    end
+                end
+            end
+        end
+        local function binding(field)
+            if not finite(before[field]) then return nil end
+            for _, fn in ipairs(functions) do
+                for index, old in pairs(getUpvalues(fn)) do
+                    if type(index) == "number" and index >= 1 and index % 1 == 0 and equal(old, before[field]) then
+                        if not sameWorld(target) then return nil, "World berubah; teleport dibatalkan." end
+                        local probe = old + 0.125
+                        local ok = pcall(set, fn, index, probe)
+                        local current = ok and sample() or nil
+                        local matched = probe ~= old and current and equal(current[field], probe)
+                        if matched then
+                            for _, other in ipairs({ "x", "y", "vx", "vy" }) do
+                                if other ~= field and finite(before[other]) and not equal(current[other], before[other]) then matched = false end
+                            end
+                        end
+                        local restored = pcall(set, fn, index, old)
+                        local after = sample()
+                        restored = restored and equal(getUpvalues(fn)[index], old) and after ~= nil
+                        if restored then
+                            for _, key in ipairs({ "x", "y", "vx", "vy" }) do
+                                if finite(before[key]) and not equal(after[key], before[key]) then restored = false end
+                            end
+                        end
+                        if not restored then return nil, "Upvalue posisi tidak bisa dipulihkan; perpindahan dihentikan." end
+                        if matched then return { fn = fn, index = index, old = old } end
+                    end
+                end
+            end
+        end
+        local bx, whyX = binding("x")
+        if whyX then return false, whyX end
+        local by, whyY = binding("y")
+        if whyY then return false, whyY end
+        if not bx or not by then return false, "Posisi game belum bisa ditulis oleh executor ini." end
+        local changes = { { bind = bx, value = target.x }, { bind = by, value = target.y } }
+        for _, field in ipairs({ "vx", "vy" }) do
+            local b, why = binding(field)
+            if why then return false, why end
+            if b then changes[#changes + 1] = { bind = b, value = 0 } end
+        end
+        if not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
+        local ok = pcall(function()
+            for _, change in ipairs(changes) do set(change.bind.fn, change.bind.index, change.value) end
+        end)
+        if ok and arrived() then return true end
+        for i = #changes, 1, -1 do
+            local b = changes[i].bind
+            pcall(set, b.fn, b.index, b.old)
+        end
+        return false, "Perubahan posisi tidak terbaca oleh game."
+    end
+    function TP.run()
+        if TP.Busy then return false, "Teleport masih berjalan." end
+        local target, why = TP.resolve(TP.X, TP.Y)
+        if not target then TP.Status = why; return false, why end
+        local state, stateError = sample()
+        if not state then TP.Status = stateError; return false, stateError end
+        if State.Running or State.Override or Clear.Running or Farmer.Running or Pabrik.Running
+            or Pabrik.Traveling or Build.Running or Splice.Running or Splice.Roaming or Vend.Running or AutoInput.active then
+            TP.Status = "Jeda Auto Farm / aktivitas gerak dulu sebelum teleport."
+            return false, TP.Status
+        end
+        TP.Busy = true
+        local ok, result, err = pcall(function()
+            if not alive() or not sameWorld(target) then return false, "World berubah; teleport dibatalkan." end
+            TP.Status = ("Memindahkan ke (%d,%d)..."):format(target.tx, target.ty)
+            local moved, reason = TP.apply(target, state)
+            if not moved then return false, reason end
+            pcall(Auto.resetReach)
+            -- Hanya periksa hasil. Jangan paksa ulang posisi jika game mengembalikannya.
+            for _ = 1, 3 do
+                task.wait(0.15)
+                if not alive() or not sameWorld(target) then return false, "World / sesi berubah setelah perpindahan." end
+                local s = sample()
+                if not s or math.floor(s.x) ~= target.px or math.floor(s.y - 0.475) ~= target.py then
+                    return false, "Posisi bergerak / dikembalikan lagi setelah teleport."
+                end
+            end
+            return true
+        end)
+        TP.Busy = false
+        if not ok then TP.Status = "Teleport gagal: " .. string.sub(tostring(result), 1, 180)
+        elseif not result then TP.Status = err or "Teleport belum berhasil."
+        else TP.Status = ("Posisi terbaca di tile (%d,%d)."):format(target.tx, target.ty) end
+        return ok and result == true, TP.Status
+    end
+    function TP.text()
+        local s = sample()
+        local cx, cy = calibration()
+        local current = s and cx and (("(%d,%d)"):format(math.floor(s.x) + cx, math.floor(s.y - 0.475) + cy)) or "belum terbaca"
+        return "World: " .. tostring(Refs.World and Refs.World.name or "-")
+            .. "\nPosisi sekarang: " .. current .. "\nTujuan: (" .. tostring(TP.X) .. "," .. tostring(TP.Y) .. ")"
+            .. "\nTeleport r4: " .. TP.Status
+    end
+end)() end
 
 ---------------------------------------------------------------------
 -- AUTO CHAT
@@ -8924,6 +9172,53 @@ safe(function()
         Callback = function(on) setGhost(on) end,
     })
 end)
+
+-- ===== TAB: TELEPORT =====
+do (function()
+    local TP = Auto.Teleport
+    local tab = makeTab("Teleport", "map-pin", "fitur")
+    safe(function()
+        UI.TeleportStatus = tab:Paragraph({ Title = "Status Teleport", Desc = TP.text() })
+    end)
+    local ctl = box(tab, "Tujuan tile di world ini", true)
+    safe(function()
+        UI.TeleportX = ctl:Input({
+            Title = "Koordinat X", Desc = "Kolom tile, mengikuti koordinat pada Status", Value = TP.X, Placeholder = "contoh: 10",
+            Callback = function(text) TP.X = tostring(text or "") end,
+        })
+    end)
+    safe(function()
+        UI.TeleportY = ctl:Input({
+            Title = "Koordinat Y", Desc = "Baris tile, mengikuti koordinat pada Status", Value = TP.Y, Placeholder = "contoh: 20",
+            Callback = function(text) TP.Y = tostring(text or "") end,
+        })
+    end)
+    safe(function()
+        ctl:Button({
+            Title = "Gunakan posisi sekarang",
+            Callback = function()
+                UI.later("teleportCapture", function()
+                    local ok, why = TP.capture()
+                    if not ok then notify("Teleport", why, 5); return end
+                    if UI.TeleportX then UI.TeleportX:Set(TP.X) end
+                    if UI.TeleportY then UI.TeleportY:Set(TP.Y) end
+                end)
+            end,
+        })
+    end)
+    safe(function()
+        ctl:Button({
+            Title = "Teleport ke koordinat",
+            Desc = "Jeda Auto Farm / gerak dulu. Pilih tile kosong; posisi diperiksa setelah dipindahkan.",
+            Callback = function()
+                UI.later("teleportRun", function()
+                    local ok, why = TP.run()
+                    notify("Teleport", why, ok and 4 or 6)
+                end)
+            end,
+        })
+    end)
+end)() end
 
 -- ===== TAB: AUTO CHAT =====
 local ChatTab = makeTab("Auto Chat", "message-circle", "fitur")
@@ -11882,6 +12177,13 @@ task.spawn(function()
         Auto.updateClearStatus()
         Auto.updateFarmerStatus()
         updateSpamStatus()
+        if UI.TeleportStatus and Auto.Teleport then
+            local text = Auto.Teleport.text()
+            if text ~= Auto.Teleport.Shown then
+                Auto.Teleport.Shown = text
+                pcall(function() UI.TeleportStatus:SetDesc(text) end)
+            end
+        end
         if UI.ConfigStatus and Config.Status ~= Config.Shown then
             Config.Shown = Config.Status
             pcall(function() UI.ConfigStatus:SetDesc(Config.Status) end)

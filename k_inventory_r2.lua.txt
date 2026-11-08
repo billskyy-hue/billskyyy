@@ -2113,12 +2113,49 @@ function getUpvalues(fn)
     return out
 end
 
--- Cek apakah tabel ini daftar drop game
-local function isDropList(t)
-    if type(t) ~= "table" or t == Refs.World then return false end
-    local first = rawget(t, 1)
-    if first == nil then return next(t) == nil end
-    return type(first) == "table" and rawget(first, "uid") ~= nil and rawget(first, "frame") ~= nil
+function Drops.record(d)
+    if type(d) ~= "table" then return false end
+    local uidType = type(d.uid)
+    if uidType ~= "number" and uidType ~= "string" then return false end
+    if (uidType == "number" and (d.uid ~= d.uid or math.abs(d.uid) == math.huge))
+        or (uidType == "string" and d.uid == "") then return false end
+    for _, key in ipairs({ "id", "x", "y", "n" }) do
+        local value = d[key]
+        if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return false end
+    end
+    return d.n >= 0 and d.id >= 0 and d.id % 1 == 0
+end
+
+function Drops.snapshot(list)
+    local out = {}
+    list = list or Drops.list
+    if type(list) == "table" then
+        for _, d in pairs(list) do
+            if Drops.record(d) then out[#out + 1] = d end
+        end
+    end
+    return out
+end
+
+function Drops.key(list, drop)
+    for key, value in pairs(list or {}) do
+        if rawequal(value, drop) then return key end
+    end
+end
+
+function Drops.fail(message)
+    Drops.Status, Drops.LastError = message, message
+end
+
+-- Tabel kosong hanya sah dari getter drop milik world. Upvalue kosong bisa saja
+-- cache lain: dahulu tabel itu diterima lebih dulu dan collect tidak melihat drop.
+local function isDropList(t, allowEmpty)
+    if type(t) ~= "table" or t == Refs.World or t == Refs.Inv then return false end
+    if next(t) == nil then return allowEmpty == true end
+    for _, d in pairs(t) do
+        if Drops.record(d) then return true end
+    end
+    return false
 end
 
 -- deep = true: boleh pakai getgc (berat, bisa bikin lag / crash di HP) -> hanya dari tombol "Hubungkan ke game"
@@ -2128,9 +2165,10 @@ local function findDropRefs(deep)
     local dl = w0 and rawget(w0, "dropList")
     if type(dl) == "function" then
         local okl, l = pcall(dl)
-        if okl and isDropList(l) then
+        if okl and isDropList(l, true) then
             if Drops.list ~= l then Drops.update = nil end
             Drops.list = l
+            Drops.Source = "World.dropList"
             -- v5.9.0: fungsi update (kurangi / hapus drop) juga wajib dicari. Dulu langsung
             -- return di sini, jadi Drops.update kosong -> drop hasil mode Remote tidak dihapus.
             if not Drops.update then Drops.findUpdate() end
@@ -2138,15 +2176,14 @@ local function findDropRefs(deep)
         end
     end
     if Drops.list and not deep then return true end -- yang lama masih dipakai
-    Drops.list, Drops.update = nil, nil
+    Drops.list, Drops.update, Drops.Source = nil, nil, nil
     -- 1) dari fungsi World.dropTaken (isinya: daftar drop + fungsi update)
     local wd = Refs.World and rawget(Refs.World, "dropTaken")
     if type(wd) == "function" then
         for _, u in pairs(getUpvalues(wd)) do
             if not Drops.list and isDropList(u) then
                 Drops.list = u
-            elseif not Drops.update and type(u) == "function" then
-                Drops.update = u
+                Drops.Source = "World.dropTaken"
             end
         end
     end
@@ -2161,8 +2198,7 @@ local function findDropRefs(deep)
                     for _, u in pairs(getUpvalues(fn)) do
                         if not Drops.list and isDropList(u) then
                             Drops.list = u
-                        elseif not Drops.update and type(u) == "function" then
-                            Drops.update = u
+                            Drops.Source = "DropTaken event"
                         end
                     end
                 end
@@ -2171,18 +2207,15 @@ local function findDropRefs(deep)
         end
     end
     -- 3) cadangan: cari lewat getgc (hanya kalau diminta: berat)
-    if not Drops.list and deep and getgc then
-        for _, v in ipairs(getgc(true)) do
-            if type(v) == "table" then
-                local e = rawget(v, 1)
-                if type(e) == "table" and rawget(e, "uid") ~= nil and rawget(e, "frame") ~= nil
-                    and rawget(e, "born") ~= nil then
-                    Drops.list = v
-                    break
-                end
+    if not Drops.list and deep and type(getgc) == "function" then
+        local ok, objects = pcall(getgc, true)
+        if ok and type(objects) == "table" then
+            for _, v in pairs(objects) do
+                if isDropList(v) then Drops.list, Drops.Source = v, "getgc"; break end
             end
         end
     end
+    if Drops.list then Drops.findUpdate() end
     return Drops.list ~= nil
 end
 
@@ -2210,7 +2243,7 @@ end
 -- Tanpa ini, loop gambar game menampilkan drop lagi (flown di-reset saat badan tidak menyentuh).
 function Drops.applyTaken(d, left)
     local list = Drops.list
-    if not list or not table.find(list, d) then return end
+    if not list or Drops.key(list, d) == nil then return end
     if not Drops.update then Drops.findUpdate() end
     if Drops.update then
         local ok = pcall(Drops.update, d, left)
@@ -2231,15 +2264,20 @@ function Drops.applyTaken(d, left)
         d.flown = nil
         if typeof(d.frame) == "Instance" then pcall(function() d.frame.Visible = not d.culled end) end
     else
-        local i = table.find(list, d)
-        if i then table.remove(list, i) end
+        local i = Drops.key(list, d)
+        if type(i) == "number" and i >= 1 and i % 1 == 0 and i <= #list then table.remove(list, i)
+        elseif i ~= nil then list[i] = nil end
         if typeof(d.frame) == "Instance" then pcall(function() d.frame:Destroy() end) end
     end
 end
 
 local function takeDrop(d)
+    if not Drops.record(d) then return false end
     local worldTake = Refs.World and rawget(Refs.World, "takeDrop")
-    if type(worldTake) ~= "function" and not TakeDropRemote then return false end
+    if type(worldTake) ~= "function" and not TakeDropRemote then
+        Drops.fail("Fungsi ambil drop game belum ditemukan; tekan Hubungkan ke game")
+        return false
+    end
     if d.taking or d.pending or d.display or (d.n or 0) <= 0 then return false end
     -- drop yang kamu buang sendiri belum boleh dipungut lagi (aturan game), kecuali gems
     if d.armed == false and d.id ~= 112 then return false end
@@ -2252,6 +2290,7 @@ local function takeDrop(d)
         if okr and type(room) == "number" then amount = math.min(amount, room) end
     end
     if amount <= 0 then -- inventori penuh: coba lagi 1 detik lagi
+        Drops.fail("Inventori penuh untuk " .. itemName(d.id))
         DropFailUntil[d.uid] = now + 1
         local last = Hook.LastFull[d.id]
         if not last or now - last > 120 then
@@ -2274,8 +2313,10 @@ local function takeDrop(d)
     end
     d.taking = false
 
-    if not (ok and type(taken) == "number" and taken > 0) then
-        State.CollectFail += 1
+    if not (ok and type(taken) == "number" and taken > 0 and taken <= amount) then
+        State.CollectFail = State.CollectFail + 1
+        Drops.fail(ok and "Pengambilan drop ditolak / belum dikonfirmasi server"
+            or ("Gagal ambil drop: " .. string.sub(tostring(taken), 1, 180)))
         d.refused = os.clock() -- tanda ditolak, sama seperti game
         d.failN = (d.failN or 0) + 1
         DropFailUntil[d.uid] = os.clock() + math.min(8, d.failN) -- 1, 2, 3.. detik (yang terus ditolak makin jarang)
@@ -2291,9 +2332,11 @@ local function takeDrop(d)
         pcall(function() Refs.Inv:add(d.id, taken) end)
     end
     Drops.applyTaken(d, math.max(0, (d.n or 0) - taken)) -- kurangi / hapus drop seperti game
-    State.Collected += taken
+    State.Collected = State.Collected + taken
     Stats.Items[d.id] = (Stats.Items[d.id] or 0) + taken
     State.LastAction = "Collect " .. itemName(d.id) .. " x" .. taken
+    Drops.Status = "Terambil " .. itemName(d.id) .. " x" .. taken
+    Drops.LastError = nil
     return true
 end
 
@@ -2310,7 +2353,7 @@ local OffsetParse = {}
 local nextDropScan = 0
 
 local function canTry(d, now)
-    if type(d) ~= "table" or d.taking or (d.n or 0) <= 0 or type(d.x) ~= "number" then return false end
+    if not Drops.record(d) or d.taking or d.pending or d.display or d.n <= 0 then return false end
     if d.armed == false and d.id ~= 112 then return false end
     local fail = DropFailUntil[d.uid]
     return not (fail and now < fail)
@@ -2323,17 +2366,21 @@ end
 function Drops.remoteTick(list, s)
     local offs = farmOffsets()
     local farmArea = (State.AutoCollect or State.Override ~= nil) and next(offs) ~= nil
-    local nearArea = (Clear.Running and Clear.Collect) or (Farmer.Running and Farmer.Collect)
+    local nearArea = State.CollectAround or (Clear.Running and Clear.Collect) or (Farmer.Running and Farmer.Collect)
         or Pabrik.Running or Build.Running or Splice.Roaming
-    if not farmArea and not nearArea then return end
+    if not farmArea and not nearArea then
+        Drops.Status = "Pilih tile Grid atau aktifkan Collect di sekitar karakter"
+        return 0
+    end
     local cx, cy = s.x, s.y - 0.475
     local ptx, pty = getPlayerTile()
     local now = os.clock()
     local R = (State.CollectRadius or 3) + 0.2
     local z = Pabrik.Zone -- tempat drop pabrik tidak ikut diambil lagi
     if z and z.world ~= (Refs.World and rawget(Refs.World, "name")) then z = nil end
-    for i = #list, 1, -1 do
-        local d = list[i]
+    local queued = 0
+    -- Snapshot mencegah drop terlewati saat request cepat menghapus elemen list.
+    for _, d in ipairs(Drops.snapshot(list)) do
         if canTry(d, now) and not (z and math.abs(d.x - z.x) <= 2.5 and math.abs(d.y - z.y) <= 2.5) then
             local hit = nearArea and math.abs(d.x - cx) <= R and math.abs(d.y - cy) <= R
             if not hit and farmArea and ptx then
@@ -2350,20 +2397,23 @@ function Drops.remoteTick(list, s)
                     end
                 end
             end
-            if hit then task.spawn(takeDrop, d) end
+            if hit then queued = queued + 1; task.spawn(takeDrop, d) end
         end
     end
+    if queued == 0 then Drops.Status = "Menunggu drop dalam area collect" end
+    return queued
 end
 
 local function collectTick()
-    local busy = State.AutoCollect or State.Override ~= nil or (Clear.Running and Clear.Collect)
+    local busy = State.AutoCollect or State.CollectAround or State.Override ~= nil or (Clear.Running and Clear.Collect)
         or (Farmer.Running and Farmer.Collect) or Pabrik.Running or Build.Running or Splice.Roaming or Vend.Running
-    if not busy then return end
+    if not busy then Drops.Status = "Mati"; return end
     local tnow = os.clock()
     if tnow < (Drops.nextTick or 0) then return end -- 5-10x per detik cukup (hemat FPS)
     Drops.nextTick = tnow + ((State.CollectMode == "Remote") and 0.1 or 0.2)
     local list = Drops.list
     if not list then
+        Drops.Status = "Daftar drop belum ditemukan; coba Hubungkan ke game saat ada drop"
         local now = os.clock()
         if now >= nextDropScan then -- cari daftar drop paling sering tiap 5 detik
             nextDropScan = now + 5
@@ -2373,21 +2423,27 @@ local function collectTick()
     end
     local ok, s = false, nil
     if Refs.State then ok, s = pcall(Refs.State) end
-    if not (ok and type(s) == "table" and type(s.x) == "number") then return end
+    if not (ok and type(s) == "table" and type(s.x) == "number" and type(s.y) == "number") then
+        Drops.Status = "Posisi karakter belum terbaca"
+        return
+    end
     if State.CollectMode == "Remote" then
         Drops.remoteTick(list, s) -- jumlah terambil dihitung oleh takeDrop
         return
     end
+    Drops.Status = AutoInput.Menu and "Sentuhan: drop diambil saat badan menyentuhnya"
+        or "Kontrol gerak game belum terhubung; tekan Hubungkan ke game"
+    if State.CollectAround then Drops.Status = Drops.Status .. "; untuk radius gunakan mode Remote" end
     local cx, cy = s.x, s.y - 0.475
     local seen = {}
-    for _, d in ipairs(list) do
+    for _, d in ipairs(Drops.snapshot(list)) do
         if type(d) == "table" and type(d.x) == "number" and math.abs(d.x - cx) <= 1.5 and math.abs(d.y - cy) <= 1.5 then
             seen[d] = d.n or 0
         end
     end
     for d, n in pairs(Drops.seen or {}) do
-        if seen[d] == nil and not table.find(list, d) and d.id and n > 0 then -- hilang di dekat badan = terambil
-            State.Collected += n
+        if seen[d] == nil and Drops.key(list, d) == nil and d.id and n > 0 then -- hilang di dekat badan = terambil
+            State.Collected = State.Collected + n
             Stats.Items[d.id] = (Stats.Items[d.id] or 0) + n
         end
     end
@@ -2395,7 +2451,10 @@ local function collectTick()
 end
 
 table.insert(Connections, RunService.Heartbeat:Connect(function()
-    if alive() then collectTick() end
+    if alive() then
+        local ok, err = pcall(collectTick)
+        if not ok then Drops.fail("Error collect: " .. string.sub(tostring(err), 1, 180)) end
+    end
 end))
 
 -- Tunggu sebentar sampai drop di tile ini terambil (supaya tidak tertimpa block baru)
@@ -2405,7 +2464,7 @@ local function waitTileDrops(t, maxSec)
     local t0 = os.clock()
     while os.clock() - t0 < maxSec and alive() do
         local now, busy = os.clock(), false
-        for _, d in ipairs(list) do
+        for _, d in ipairs(Drops.snapshot(list)) do
             if type(d) == "table" and type(d.x) == "number" and (d.n or 0) > 0 and inTile(t, d.x, d.y)
                 and (d.taking or canTry(d, now)) then
                 busy = true
@@ -2429,7 +2488,7 @@ local function waitNearDrops(maxSec)
         if not (ok and type(s) == "table" and type(s.x) == "number") then return end
         local cx, cy = s.x, s.y - 0.475
         local busy = false
-        for _, d in ipairs(list) do
+        for _, d in ipairs(Drops.snapshot(list)) do
             -- sama dengan aturan game: < 0.6 tile mendatar & setinggi badan (kaki s.y, kepala s.y - 0.95)
             if type(d) == "table" and type(d.x) == "number" and (d.n or 0) > 0 and d.armed ~= false
                 and math.abs(d.x - s.x) < 0.6 and d.y + 0.3 > s.y - 0.95 and d.y - 0.3 < s.y then
@@ -2472,6 +2531,9 @@ local function updateStatus()
         .. "\nTile     : " .. offsetsText()
         .. "\nPlace/Break/Collect : " .. State.Placed .. " / " .. State.Broken .. " / " .. State.Collected
         .. (State.CollectFail > 0 and (" (ditolak " .. State.CollectFail .. ")") or "")
+        .. "\nCollect r3 [" .. tostring(State.CollectMode) .. "]: " .. tostring(Drops.Status or "menunggu koneksi")
+        .. "\nDaftar drop: " .. tostring(#Drops.snapshot()) .. " | sumber: " .. tostring(Drops.Source or "belum ditemukan")
+        .. (Drops.LastError and ("\nAlasan collect: " .. Drops.LastError) or "")
         .. (State.Dropped > 0 and ("\nDrop seed: di-drop " .. State.Dropped) or "")
         .. "\nAksi     : " .. State.LastAction
     if txt == lastStatusText then return end
@@ -2592,10 +2654,30 @@ local function isDownWrapper(saved, key, ...)
     return OrigIsDown(saved, key, ...)
 end
 
-if MenuModOk and type(MenuModule) == "table" and type(rawget(MenuModule, "isDown")) == "function" then
-    OrigIsDown = rawget(MenuModule, "isDown")
-    MenuModule.isDown = isDownWrapper
+function AutoInput.unbindMenu()
+    local menu = AutoInput.Menu
+    if menu and OrigIsDown and rawget(menu, "isDown") == isDownWrapper then
+        pcall(function() menu.isDown = OrigIsDown end)
+    end
+    AutoInput.Menu, OrigIsDown = nil, nil
 end
+
+function AutoInput.bindMenu()
+    -- Dahulukan tabel menu yang dipakai game, bukan salinan require executor.
+    local menu = Refs.Menu
+    if type(menu) ~= "table" or type(rawget(menu, "isDown")) ~= "function" then
+        menu = MenuModOk and MenuModule or nil
+    end
+    if menu == AutoInput.Menu and menu and rawget(menu, "isDown") == isDownWrapper then return true end
+    AutoInput.unbindMenu()
+    if type(menu) ~= "table" or type(rawget(menu, "isDown")) ~= "function" then return false end
+    OrigIsDown = rawget(menu, "isDown")
+    local ok = pcall(function() menu.isDown = isDownWrapper end)
+    if not ok then OrigIsDown = nil; return false end
+    AutoInput.Menu = menu
+    return true
+end
+AutoInput.bindMenu()
 
 -- Pasang walkspeed & fly tiap frame (game bisa menimpanya)
 table.insert(Connections, RunService.Heartbeat:Connect(function()
@@ -3753,8 +3835,8 @@ function Drops.touchAll(tiles, hx, hy)
     local list = Drops.list
     if not list or not OrigIsDown then return false end
     local function dropsAt(t)
-        for _, d in ipairs(list) do
-            if type(d) == "table" and type(d.x) == "number" and (d.n or 0) > 0 and d.armed ~= false
+        for _, d in ipairs(Drops.snapshot(list)) do
+            if canTry(d, os.clock())
                 and not d.taking and inTile(t, d.x, d.y) then
                 return true
             end
@@ -3910,7 +3992,7 @@ function Move.visitDrop(d)
     local ping = 0.1
     pcall(function() ping = LocalPlayer:GetNetworkPing() end)
     waitNearDrops(math.clamp(0.6 + 3 * ping, 1, 2.5))
-    local function left() return (d.n or 0) > 0 and table.find(Drops.list or {}, d) ~= nil end
+    local function left() return (d.n or 0) > 0 and Drops.key(Drops.list, d) ~= nil end
     local cur = playerState()
     if left() and cur and cur.grounded and abs(d.x - cur.x) <= 0.9 and d.y < cur.y - 0.9 and d.y > cur.y - 2.6 then
         -- drop di atas kepala: lompat sekali supaya kena badan
@@ -3995,7 +4077,7 @@ function Move.fetchDrops(live, maxDist, filter, maxSec)
         local cx, cy = s.x, s.y - 0.475
         local now = os.clock()
         local best, bd = nil, nil
-        for _, d in ipairs(list) do
+        for _, d in ipairs(Drops.snapshot(list)) do
             if want(d, now) then
                 local dx, dy = d.x - cx, d.y - cy
                 if abs(dx) <= maxDist and abs(dy) <= maxDist and (abs(dx) >= 0.6 or abs(dy) >= 0.75) then
@@ -4011,7 +4093,7 @@ function Move.fetchDrops(live, maxDist, filter, maxSec)
         else
             -- semua drop di baris itu: susuri dari ujung terdekat ke ujung lainnya
             local inRow, lo, hi = {}, best.x, best.x
-            for _, d in ipairs(list) do
+            for _, d in ipairs(Drops.snapshot(list)) do
                 if floor(d.y) == ry and abs(d.x - cx) <= maxDist and want(d, now) then
                     inRow[#inRow + 1] = d
                     if d.x < lo then lo = d.x end
@@ -4039,7 +4121,7 @@ function Move.fetchDrops(live, maxDist, filter, maxSec)
             got += 1
             Move.FetchTry = Move.FetchTry or {}
             for _, d in ipairs(inRow) do
-                if (d.n or 0) > 0 and table.find(list, d) then
+                if (d.n or 0) > 0 and Drops.key(list, d) ~= nil then
                     local okv, why = false, "nopath"
                     if ok then okv, why = Move.visitDrop(d) end
                     if not okv then
@@ -8478,6 +8560,15 @@ safe(function()
     })
 end)
 
+safe(function()
+    Box.FarmCtl:Toggle({
+        Title = "Collect di sekitar karakter",
+        Desc = "Mode Remote: ambil dalam radius meski Auto Farm mati atau Grid kosong",
+        Value = State.CollectAround,
+        Callback = function(on) State.CollectAround = on end,
+    })
+end)
+
 addNumber(Box.FarmCtl, {
     Title = "Radius collect (mode Remote)",
     Desc = "Jarak ambil drop di sekitar karakter (tile)",
@@ -11492,9 +11583,11 @@ local function reconnect(show)
     end
     -- 2) scan lengkap
     findRefs()
+    AutoInput.bindMenu()
     watchInventory()
     UI.checkInventory(true, true) -- langsung di thread ini (thread INIT / antrian UI), bukan thread tombol
     findDropRefs(true)
+    Drops.LastError = nil
     Auto.findTreeRefs()
     table.clear(DropFailUntil)
     Anim.fn, Anim.idx = nil, nil
@@ -11835,9 +11928,7 @@ Session.Cleanup = function()
     -- kembalikan fungsi game ke asal
     pcall(setLite, false)
     pcall(unhookJammer)
-    if OrigIsDown and MenuModOk and rawget(MenuModule, "isDown") == isDownWrapper then
-        MenuModule.isDown = OrigIsDown
-    end
+    AutoInput.unbindMenu()
     if Refs.World then
         if Misc.Ghost then pcall(function() Refs.World.ghost = false end) end
         if Misc.Speed ~= 100 then pcall(function() Refs.World.speedScale = 1 end) end

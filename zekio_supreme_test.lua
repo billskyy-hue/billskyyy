@@ -5344,7 +5344,8 @@ local function farmerCfg()
         area = nil,      -- function(x, y): boleh panen di sini?
         plantSet = nil,  -- [idx] = true: hanya tanam di tile ini
         exclude = nil,   -- [idx] = true: jangan tanam di tile ini
-        row = Farmer.Row,        -- tanam rapi per baris
+        row = nil,               -- Farmer: semua baris yang masuk jangkauan
+        batch = true,            -- jeda sekali per putaran, bukan per tile
         collect = Farmer.Collect, -- ambil drop panen dulu sebelum lanjut
         status = function(t) Farmer.Status = t end,
         onHarvest = function(id)
@@ -5404,8 +5405,162 @@ function Move.harvestTree(x, y, id, R)
     return false, "unchanged"
 end
 
+-- Antrean Farmer memakai jangkauan pukul dan tanam masing-masing. Pabrik /
+-- produksi lahan tetap memakai pengaturan baris dan fase yang sudah ada.
+function Move.farmerAreaTargets(s, kind, cfg)
+    local w = Refs.World
+    if not w or not s then return {}, 0 end
+    local harvesting = kind == "harvest"
+    local R = (harvesting and punchReach() or buildReach()) - 0.08
+    local cx, cy, list = s.x, s.y - 0.475, {}
+    local now, st = os.clock(), workspace:GetServerTimeNow()
+    for y = math.max(0, floor(cy - R - 0.5)), math.min(w.h - 1, floor(cy + R + 0.5)) do
+        for x = math.max(0, floor(cx - R - 0.5)), math.min(w.w - 1, floor(cx + R + 0.5)) do
+            local idx = y * w.w + x
+            if stateReaches(s, x, y, R) and not skipped(cfg.skip, idx, now) then
+                local id = fgIdAt(x, y)
+                if harvesting and cfg.harvest and id ~= 0 and (not cfg.only or id == cfg.only)
+                    and (not cfg.area or cfg.area(x, y)) then
+                    local ra = treeReadyAt(x, y, id)
+                    if ra and st >= ra and Move.los(floor(cx), floor(cy), x, y) then
+                        if canWorkAt(x, y) then
+                            list[#list + 1] = { x = x, y = y, idx = idx, id = id, readyAt = ra }
+                        else
+                            skipTile(cfg.skip, idx, 120)
+                        end
+                    end
+                elseif not harvesting and cfg.plant and id == 0
+                    and (not cfg.plantSet or cfg.plantSet[idx])
+                    and (not cfg.exclude or not cfg.exclude[idx])
+                    and plantSpotOk(x, y, cfg.seed) then
+                    list[#list + 1] = { x = x, y = y, idx = idx }
+                end
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if harvesting and a.readyAt ~= b.readyAt then return a.readyAt < b.readyAt end
+        if a.y ~= b.y then return a.y < b.y end
+        return a.x < b.x
+    end)
+    return list, R
+end
+
+-- Kirim pukulan ke seluruh antrean dahulu; konfirmasi balasannya bersama.
+-- Tidak menunggu satu pohon selesai sebelum pohon berikutnya mendapat aksi.
+function Move.farmerArea(s)
+    local cfg, w = FC, Refs.World
+    local function live()
+        return FC == cfg and cfg.run() and alive() and Refs.World == w
+    end
+    if not live() then return 0 end
+    local harvest, HR = Move.farmerAreaTargets(s, "harvest", cfg)
+    local done, got, planted, failed = 0, 0, 0, 0
+    Farmer.BatchHarvest, Farmer.BatchPlanted = 0, 0
+    local function confirmed(t)
+        if t.finished then return end
+        t.finished = true
+        got += 1
+        Farmer.BatchHarvest = got
+        State.Broken += 1
+        Drops.brokeAt[t.x .. "," .. t.y] = os.clock()
+        cfg.onHarvest(t.id)
+    end
+    for round = 1, 3 do
+        for _, t in ipairs(harvest) do
+            if not live() then return done end
+            if not t.finished then
+                local cur = playerState()
+                local ra = treeReadyAt(t.x, t.y, t.id)
+                if t.sent and fgIdAt(t.x, t.y) ~= t.id then
+                    confirmed(t)
+                elseif not cur or cur.dead or not stateReaches(cur, t.x, t.y, HR)
+                    or fgIdAt(t.x, t.y) ~= t.id or ra ~= t.readyAt
+                    or workspace:GetServerTimeNow() < ra then
+                    t.finished = true
+                else
+                    local punch = Refs.Punch
+                    local ok = type(punch) == "function"
+                    if ok then
+                        ok = pcall(punch, t.x, t.y, State.MutePunch or nil, nil)
+                        done += 1
+                    end
+                    if ok then
+                        t.sent = true
+                        if State.Visual and Anim.swing then Anim.swing(t.x, t.y, "punch") end
+                        if fgIdAt(t.x, t.y) ~= t.id then confirmed(t) end
+                    else
+                        t.finished = true
+                        failed += 1
+                        skipTile(cfg.skip, t.idx, 3)
+                    end
+                end
+            end
+        end
+        local untilAt = os.clock() + 0.45
+        while live() do
+            local pending = false
+            for _, t in ipairs(harvest) do
+                if t.sent and not t.finished then
+                    if fgIdAt(t.x, t.y) ~= t.id then confirmed(t) else pending = true end
+                end
+            end
+            if not pending or os.clock() >= untilAt then break end
+            task.wait(0.05)
+        end
+        local pending = false
+        for _, t in ipairs(harvest) do if not t.finished then pending = true; break end end
+        if not pending then break end
+    end
+    if not live() then return done end
+    for _, t in ipairs(harvest) do
+        if not t.finished then
+            failed += 1
+            skipTile(cfg.skip, t.idx, 3)
+        end
+    end
+    if #harvest > 0 and not waitAuto(cfg.hms) then return done end
+    if not live() then return done end
+
+    -- Scan ulang sesudah panen: tile yang baru kosong bisa langsung ditanam
+    -- dalam putaran ini, termasuk tile di baris lain yang masih terjangkau.
+    local plant, PR = Move.farmerAreaTargets(playerState(), "plant", cfg)
+    for _, t in ipairs(plant) do
+        if not live() then return done end
+        if not cfg.seed or invCount(cfg.seed) <= 0 then break end
+        local cur = playerState()
+        if cur and not cur.dead and stateReaches(cur, t.x, t.y, PR)
+            and plantSpotOk(t.x, t.y, cfg.seed) then
+            done += 1
+            if sendSetTile("fg", t.x, t.y, cfg.seed) then
+                if Refs.Inv then pcall(function() Refs.Inv:remove(cfg.seed, 1) end) end
+                cfg.onPlant()
+                planted += 1
+                Farmer.BatchPlanted = planted
+            else
+                failed += 1
+                skipTile(cfg.skip, t.idx, 3)
+            end
+        end
+    end
+    if planted > 0 and not waitAuto(cfg.pms) then return done end
+    if not live() then return done end
+    if done > 0 or failed > 0 then
+        cfg.status(("Area: panen %d/%d | tanam %d%s"):format(got, #harvest, planted,
+            failed > 0 and (" | %d belum berhasil, dicoba lagi"):format(failed) or ""))
+    end
+    if got > 0 and cfg.collect then
+        task.wait(0.25)
+        if not live() then return done end
+        local cy = s.y - 0.475
+        Move.fetchDrops(live, 8, function(d) return abs(d.y - cy) <= 1.6 end, 10)
+    end
+    return done
+end
+
 -- Panen & tanam semua yang terjangkau dari sini
 local function farmerWorkInReach(s)
+    if FC.batch then return Move.farmerArea(s) end
     local w = Refs.World
     local W = w.w
     local R = farmReach() - 0.08
@@ -5602,6 +5757,7 @@ local function updateFarmerStatus()
     local txt = "Status  : " .. (Farmer.Running and "JALAN" or "BERHENTI")
         .. "\nPanen   : " .. Farmer.Harvested .. "  | tanam: " .. Farmer.Planted .. "  | collect: " .. State.Collected
         .. "\nSeed    : " .. (seed and (itemName(seed) .. " x" .. invCount(seed)) or "-")
+        .. "\nMode    : semua tile terjangkau per putaran"
         .. "\nPohon   : " .. (Refs.Trees and "terbaca" or "TIDAK terbaca (harvest mati)")
         .. "\nKontrol : " .. AutoInput.status()
         .. "\nPijakan : " .. blockText(Farmer.UseBlock, Farmer.ScaffoldId)
@@ -5652,16 +5808,21 @@ local function fieldStep()
     end
     Move.AirAt = nil
     releaseInput()
+    if FC.batch and not FC.harvest and not FC.plant then return "idle" end
     if FC.yieldHarvest and FC.yieldHarvest() then return "harvest" end
     if farmerWorkInReach(s) > 0 then return "work" end
     if FC.yieldHarvest and FC.yieldHarvest() then return "harvest" end
-    local R = farmReach() - 0.35
+    local R = FC.batch and math.max(FC.harvest and punchReach() or 0, FC.plant and buildReach() or 0) - 0.35
+        or farmReach() - 0.35
     local useBlock = scaffoldId() ~= nil
     local sx, sy = startNode(s)
     local px, py = floor(s.x), floor(s.y - 0.475)
     local targets, nextReady = farmerScan(px, py, 8, reachFilter(sy * w.w + sx, R, useBlock))
     if not FC.run() or not alive() then return "wait" end
     if #targets == 0 then return "idle", nextReady end
+    if FC.batch then
+        R = (targets[1].kind == "harvest" and punchReach() or buildReach()) - 0.35
+    end
     targets.los = targets[1].kind == "harvest" -- panen: berdiri di baris pohon (drop terambil)
     if targets[1].kind == "plant" then targets.cancel = FC.yieldHarvest end
     travelGroup(sx, sy, targets, R, useBlock, FC.skip, FarmerFail)
@@ -5780,6 +5941,7 @@ local function startFarmer()
     table.clear(BadEdge)
     table.clear(Farmer.Row)
     Farmer.DropOffUntil = 0
+    Farmer.BatchHarvest, Farmer.BatchPlanted = 0, 0
     Farmer.Status = "Mulai..."
     Farmer.Running = true
     autoBegin()
@@ -8994,7 +9156,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.10 | TEST r15",
+    Author = "v5.9.11 | TEST r16",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -9245,7 +9407,7 @@ Box.FarmerBlock = box(FarmerTab, "Block pijakan", false)
 safe(function()
     UI.FarmerToggle = Box.FarmerCtl:Toggle({
         Title = "Jalankan Farmer",
-        Desc = "Panen pohon siap & tanam seed otomatis",
+        Desc = "Panen & tanam semua tile valid dalam jangkauan sebelum pindah",
         Value = false,
         Callback = function(on)
             if on then Auto.startFarmer() elseif Farmer.Running then stopFarmer() end
@@ -9305,14 +9467,14 @@ end)
 
 addNumber(Box.FarmerSpeed, {
     Title = "Speed Harvest (ms)",
-    Desc = "Jeda setelah tiap panen",
+    Desc = "Farmer: jeda setelah satu putaran panen area",
     Min = 140, Max = 2000, Step = 10, Default = Farmer.HarvestMs,
     Callback = function(v) Farmer.HarvestMs = math.floor(v) end,
 })
 
 addNumber(Box.FarmerSpeed, {
     Title = "Speed Plant (ms)",
-    Desc = "Jeda setelah tiap tanam seed",
+    Desc = "Farmer: jeda setelah satu putaran tanam area",
     Min = 140, Max = 2000, Step = 10, Default = Farmer.PlantMs,
     Callback = function(v) Farmer.PlantMs = math.floor(v) end,
 })

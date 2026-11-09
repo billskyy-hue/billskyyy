@@ -2192,8 +2192,8 @@ local function breakableAt(x, y)
 end
 
 -- Pukul 1 kali. Hasil: "hit" / "broke" / nil
--- includeBg = ikut pecah background; nativeOnly = jangan pakai hitungan cadangan
-local function tryBreak(x, y, includeBg, nativeOnly)
+-- includeBg = ikut pecah background
+local function tryBreak(x, y, includeBg)
     if includeBg == nil then includeBg = State.BreakBackground end
     local key = x .. "," .. y
     local fg = tileAt("fg", x, y)
@@ -2215,16 +2215,11 @@ local function tryBreak(x, y, includeBg, nativeOnly)
         PlacedAt[key] = nil
     end
 
-    -- Clear harus memilih ulang kalau isi tile berubah saat menunggu pijakan.
-    if nativeOnly and (tileAt("fg", x, y) ~= fg or tileAt(layer, x, y) ~= id) then
-        return nil, "tile-changed"
-    end
-
-    if type(Refs.Punch) == "function" then
+    if Refs.Punch then
         local ok, err = pcall(Refs.Punch, x, y, State.MutePunch or nil, nil)
         if not ok then
             State.LastAction = "Error pukul: " .. tostring(err)
-            return nil, "punch-error"
+            return nil
         end
         if State.Visual then Anim.swing(x, y, "punch") end
         if tileAt(layer, x, y) ~= id then
@@ -2235,11 +2230,6 @@ local function tryBreak(x, y, includeBg, nativeOnly)
         end
         State.LastAction = "Pukul " .. itemName(id) .. " (" .. x .. "," .. y .. ")"
         return "hit"
-    end
-
-    if nativeOnly then
-        State.LastAction = "Fungsi pukul game terputus"
-        return nil, "native-missing"
     end
 
     -- Cadangan: hitung pukulan sendiri
@@ -4181,16 +4171,17 @@ local function execPillar(e)
     return false
 end
 
-local function followPath(path)
+local function followPath(path, cancel)
     local i = 1
     while i <= #path do
         if not autoOn() then return false end
+        if cancel and cancel() then releaseInput(); return false, "cancelled" end
         local e = path[i]
         local last, ok = i, false
         if e.kind == "walk" then
             -- langkah searah digabung jadi satu gerakan
             local dir = e.x - e.fx
-            while path[last + 1] and path[last + 1].kind == "walk" and (path[last + 1].x - path[last + 1].fx) == dir do
+            while not cancel and path[last + 1] and path[last + 1].kind == "walk" and (path[last + 1].x - path[last + 1].fx) == dir do
                 last += 1
             end
             local anyBuild = false
@@ -4238,6 +4229,7 @@ local function followPath(path)
             ok = Move.execStair(e)
         end
         releaseInput()
+        if cancel and cancel() then return false, "cancelled" end
         if not ok then
             -- hindari jalur ini sementara (tangga cuma sebentar, supaya tidak memutar jauh ke tangga lain)
             BadEdge[e.key] = os.clock() + ((e.kind == "stair") and 5 or 20)
@@ -4258,13 +4250,18 @@ local function travelGroup(sx, sy, group, R, useBlock, skipTbl, failTbl)
     local first = group[1]
     setMoveStatus(("Cari jalan A* ke (%d,%d)"):format(first.x, first.y))
     local path, exhausted, closed = astar(sx, sy, goals, first.x, first.y, R, useBlock)
+    if group.cancel and group.cancel() then releaseInput(); return false, "cancelled" end
     if path then
         if #path == 0 then
             for _, t in ipairs(group) do skipTile(skipTbl, t.idx, 20) end
-        elseif not followPath(path) then
-            failTbl[first.idx] = (failTbl[first.idx] or 0) + 1
-            if failTbl[first.idx] >= 3 then
-                for _, t in ipairs(group) do skipTile(skipTbl, t.idx, 40) end
+        else
+            local ok, why = followPath(path, group.cancel)
+            if why == "cancelled" then return false, why end
+            if not ok then
+                failTbl[first.idx] = (failTbl[first.idx] or 0) + 1
+                if failTbl[first.idx] >= 3 then
+                    for _, t in ipairs(group) do skipTile(skipTbl, t.idx, 40) end
+                end
             end
         end
         releaseInput()
@@ -4634,11 +4631,6 @@ local function clearCanBreak(id)
     local it = ItemDB[id]
     if not it then return false end
     if it.lock or it.area or it.guildLock or it.vend or it.display then return false end
-    -- Katalog baru bisa menyimpan nama lock tanpa flag lama. Jangan cocokkan
-    -- substring "lock" saja karena "Block" dan "Clock" juga mengandungnya.
-    local name = string.lower(tostring(it.name or "")):gsub("[_%-%s]+", " ")
-    if it.kind == "lock" or name:find("%f[%a]lock%f[%A]")
-        or name:gsub("%s", "") == "worldlock" then return false end
     local h = (it.kind == "seed") and 20 or it.hits
     if type(h) == "number" and h > 0 then return true end
     local w = Refs.World
@@ -4740,10 +4732,10 @@ local function bandTargets(top, bottom, dir, filter)
             if clearLayerAt(x, y) and not skipped(Clear.Skip, idx, now) then
                 if filter and not filter[idx] then
                     skipTile(Clear.Skip, idx, 60) -- di seberang jurang / tidak ada jalan
-                else
-                    -- Jangan saring lagi memakai asumsi API mayBuild/builderOk.
-                    -- Target ini tetap lewat fungsi pukul asli, bukan setTile.
+                elseif canWorkAt(x, y) then
                     list[#list + 1] = { x = x, y = y, idx = idx }
+                else
+                    skipTile(Clear.Skip, idx, 300) -- tidak ada izin
                 end
             end
         end
@@ -4770,10 +4762,14 @@ local function clearInReach(s, bottom, dir)
             if stateReaches(s, tx, ty, R) then
                 local idx = ty * W + tx
                 if not skipped(Clear.Skip, idx, now) and clearLayerAt(tx, ty) then
-                    list[#list + 1] = {
-                        x = tx, y = ty, idx = idx,
-                        support = (ty == footRow and tx >= colA and tx <= colB),
-                    }
+                    if canWorkAt(tx, ty) then
+                        list[#list + 1] = {
+                            x = tx, y = ty, idx = idx,
+                            support = (ty == footRow and tx >= colA and tx <= colB),
+                        }
+                    else
+                        skipTile(Clear.Skip, idx, 300)
+                    end
                 end
             end
         end
@@ -4809,18 +4805,8 @@ local function clearBreakTile(t)
     while Clear.Running and alive() do
         layer, id = clearLayerAt(x, y)
         if not layer then return end
-        local r, reason = tryBreak(x, y, Clear.IncludeBg, true)
-        if reason == "native-missing" then
-            stopClear("Fungsi pukul game terputus. Tekan 'Hubungkan ke game', lalu mulai lagi")
-            return
-        end
+        local r = tryBreak(x, y, Clear.IncludeBg)
         if r == nil then
-            if reason == "tile-changed" then
-                Clear.Status = ("Tile (%d,%d) berubah, periksa ulang"):format(x, y)
-                return
-            end
-            Clear.Status = ("Lewati (%d,%d): %s"):format(x, y,
-                reason == "punch-error" and State.LastAction or "tile belum bisa dipukul")
             skipTile(Clear.Skip, idx, 60)
             return
         end
@@ -4839,7 +4825,6 @@ local function clearBreakTile(t)
             hits += 1
             Clear.Status = "Pukul " .. itemName(id) .. " (" .. x .. "," .. y .. ")"
             if hits > maxHits then
-                Clear.Status = ("Lewati (%d,%d): tile belum berubah setelah %d pukulan"):format(x, y, hits)
                 skipTile(Clear.Skip, idx, 45)
                 return
             end
@@ -4893,7 +4878,6 @@ local function updateClearStatus()
         .. "\nSisa     : " .. (Clear.Remaining >= 0 and tostring(Clear.Remaining) or "-")
         .. "  | dilewati: " .. skippedCount(Clear.Skip)
         .. "\nPijakan  : " .. blockText(Clear.UseBlock, Clear.ScaffoldId) .. "  | dipasang: " .. Move.Placed
-        .. "\nLock     : dilindungi | pukul lewat fungsi game"
         .. "\nAksi     : " .. Clear.Status
     if txt == lastClearText then return end
     lastClearText = txt
@@ -4906,10 +4890,6 @@ local function clearLoop()
     local idle, lastUi, lastCount = 0, 0, -10
     while Clear.Running and alive() do
         task.wait()
-        if type(Refs.Punch) ~= "function" then
-            stopClear("Fungsi pukul game terputus. Tekan 'Hubungkan ke game', lalu mulai lagi")
-            return
-        end
         local now = os.clock()
         if now - lastCount > 3 then
             lastCount = now
@@ -5397,6 +5377,33 @@ local function plantSeed(x, y)
     return true
 end
 
+-- Pukulan dapat dibalas setelah frame ini. Jangan beri cooldown 30 detik
+-- hanya karena pohon belum hilang tepat saat fungsi pukul kembali.
+function Move.harvestTree(x, y, id, R)
+    for attempt = 1, 3 do
+        if not FC.run() or not alive() then return false, "cancelled" end
+        local s = playerState()
+        if not s or not stateReaches(s, x, y, R) then return false, "range" end
+        if fgIdAt(x, y) ~= id then return false, "changed" end
+        local ra = treeReadyAt(x, y, id)
+        if not ra or workspace:GetServerTimeNow() < ra then return false, "changed" end
+        local result = tryBreak(x, y, false)
+        if result == "broke" then return true end
+        if result ~= "hit" then return false, "punch" end
+        local untilAt = os.clock() + 0.45
+        repeat
+            task.wait(0.05)
+            if not FC.run() or not alive() then return false, "cancelled" end
+            if fgIdAt(x, y) ~= id then
+                Drops.brokeAt[x .. "," .. y] = os.clock()
+                State.Broken += 1
+                return true
+            end
+        until os.clock() >= untilAt
+    end
+    return false, "unchanged"
+end
+
 -- Panen & tanam semua yang terjangkau dari sini
 local function farmerWorkInReach(s)
     local w = Refs.World
@@ -5418,7 +5425,7 @@ local function farmerWorkInReach(s)
                         local ra = treeReadyAt(tx, ty, id)
                         if ra and st >= ra and Move.los(bx, by, tx, ty) then
                             if canWorkAt(tx, ty) then
-                                harvest[#harvest + 1] = { x = tx, y = ty, idx = idx }
+                                harvest[#harvest + 1] = { x = tx, y = ty, idx = idx, id = id }
                             else
                                 skipTile(FC.skip, idx, 120)
                             end
@@ -5443,14 +5450,19 @@ local function farmerWorkInReach(s)
         if not FC.run() or not alive() then return done end
         local cur = playerState()
         if not cur or not stateReaches(cur, t.x, t.y, R) then break end
-        local id = fgIdAt(t.x, t.y)
-        local r = tryBreak(t.x, t.y, false) -- pohon siap: 1 pukulan = panen
-        if r == "broke" then
+        local id = t.id
+        local harvested, why = Move.harvestTree(t.x, t.y, id, R)
+        if harvested then
             FC.onHarvest(id)
             got += 1
             FC.status("Panen " .. itemName(id) .. " (" .. t.x .. "," .. t.y .. ")")
         else
-            skipTile(FC.skip, t.idx, 30)
+            if why == "cancelled" or why == "range" then return done end
+            if why ~= "changed" then
+                skipTile(FC.skip, t.idx, 3)
+                FC.status(why == "punch" and "Pukul gagal; tekan Hubungkan ke game"
+                    or "Panen belum dikonfirmasi game, dicoba lagi")
+            end
         end
         done += 1
         if not waitAuto(FC.hms) then return done end
@@ -5465,6 +5477,7 @@ local function farmerWorkInReach(s)
     end
     for _, t in ipairs(plant) do
         if not FC.run() or not alive() then return done end
+        if FC.yieldHarvest and FC.yieldHarvest() then return done end
         if fcSeeds() <= 0 then break end
         local cur = playerState()
         if not cur or not stateReaches(cur, t.x, t.y, R) then return done end
@@ -5501,9 +5514,7 @@ local function farmerScan(px, py, maxN, filter)
                     if ra and st >= ra then
                         local idx = y * W + x
                         if not skipped(FC.skip, idx, now) then
-                            if filter and not filter[idx] then
-                                skipTile(FC.skip, idx, 60)
-                            else
+                            if not filter or filter[idx] then
                                 local dx, dy = x - px, (y - py) * 1.3
                                 local d = dx * dx + dy * dy
                                 if #best < maxN or d < best[#best].d then
@@ -5526,9 +5537,7 @@ local function farmerScan(px, py, maxN, filter)
                 local b = below and below[x] or 0
                 local idx = y * W + x
                 if b ~= 0 and fcPlantOk(idx) and not skipped(FC.skip, idx, now) then
-                    if filter and not filter[idx] then
-                        skipTile(FC.skip, idx, 60)
-                    else
+                    if not filter or filter[idx] then
                         local r = rows[y]
                         if not r then
                             r = {}
@@ -5634,7 +5643,9 @@ local function fieldStep()
     end
     Move.AirAt = nil
     releaseInput()
+    if FC.yieldHarvest and FC.yieldHarvest() then return "harvest" end
     if farmerWorkInReach(s) > 0 then return "work" end
+    if FC.yieldHarvest and FC.yieldHarvest() then return "harvest" end
     local R = farmReach() - 0.35
     local useBlock = scaffoldId() ~= nil
     local sx, sy = startNode(s)
@@ -5643,6 +5654,7 @@ local function fieldStep()
     if not FC.run() or not alive() then return "wait" end
     if #targets == 0 then return "idle", nextReady end
     targets.los = targets[1].kind == "harvest" -- panen: berdiri di baris pohon (drop terambil)
+    if targets[1].kind == "plant" then targets.cancel = FC.yieldHarvest end
     travelGroup(sx, sy, targets, R, useBlock, FC.skip, FarmerFail)
     return "move"
 end
@@ -5710,7 +5722,7 @@ local function farmerLoop()
                 parts[#parts + 1] = (seedCount() <= 0) and "seed habis / belum dipilih" or "tidak ada tempat tanam"
             end
             Farmer.Status = "Menunggu: " .. table.concat(parts, ", ")
-            if not waitAuto(1000) then break end
+            if not waitAuto(250) then break end
         end
     end
     releaseInput()
@@ -5986,7 +5998,7 @@ end
 
 -- Jalan ke 1 tile tertentu (dipakai Penjaga: balik ke posisi Auto Farm).
 -- Pakai A* yang sama, tanpa taruh block.
-local function walkTo(tx, ty, maxSec)
+local function walkTo(tx, ty, maxSec, cancel)
     local w = Refs.World
     if not w or not OrigIsDown then return false end
     if tx < 0 or ty < 0 or tx >= w.w or ty >= w.h then return false end
@@ -5995,6 +6007,7 @@ local function walkTo(tx, ty, maxSec)
     local goal = { [ty * w.w + tx] = true }
     local t0, ok = os.clock(), false
     while alive() and Move.Homing and os.clock() - t0 < (maxSec or 30) do
+        if cancel and cancel() then break end
         local s = playerState()
         if not s or s.dead then
             task.wait(0.3) -- tunggu respawn / world selesai dimuat
@@ -6006,7 +6019,10 @@ local function walkTo(tx, ty, maxSec)
             end
             local path = astar(sx, sy, goal, tx, ty, 0.5, false)
             if not path then break end -- tidak ada jalan
-            if #path > 0 then followPath(path) end
+            if #path > 0 then
+                local _, why = followPath(path, cancel)
+                if why == "cancelled" then break end
+            end
             releaseInput()
             task.wait(0.15)
         end
@@ -6169,7 +6185,7 @@ local function blockOfSeed(seed)
     return nil
 end
 
-local function readyTreeCount(whole, only)
+local function readyTreeCount(whole, only, skip)
     local w = Refs.World
     if not w then return 0 end
     local st = workspace:GetServerTimeNow()
@@ -6189,7 +6205,7 @@ local function readyTreeCount(whole, only)
                 local ra = treeReadyAt(x, y, id)
                 if ra then
                     if st >= ra then
-                        n += 1
+                        if not skip or not skipped(skip, y * w.w + x) then n += 1 end
                     elseif not nxt or ra - st < nxt then
                         nxt = ra - st
                     end
@@ -6206,8 +6222,8 @@ end
 -- Fase (berputar terus):
 --   PANEN : panen semua pohon siap di lahan (berhenti kalau block / seed hampir 200)
 --   TANAM : tanam seed di semua tile lahan yang kosong
---   BREAK : jalan ke posisi break, Auto Farm (place + break) di tile pabrik sampai block HABIS
---           (tidak diselingi cek pohon; berhenti hanya kalau seed harus di-drop / penuh / macet)
+--   BREAK : jalan ke posisi break, Auto Farm di tile pabrik; jeda saat pohon siap.
+--   Pohon siap didahulukan selama inventori masih punya ruang hasil panen.
 --   TUNGGU: tunggu pohon siap, lalu kembali ke PANEN
 --   Kapan saja seed >= batas drop -> pergi drop (seed - sisakan), lalu pulang.
 -- Inventori maksimal 200 per item, jadi semua fase dijaga supaya tidak penuh.
@@ -6237,24 +6253,46 @@ local function pabrikCfg(o, harvest, plant)
         status = function(t) Pabrik.Status = t end,
         onHarvest = function() Pabrik.Harvested += 1 end,
         onPlant = function() Pabrik.Planted += 1 end,
+        yieldHarvest = (not harvest and plant) and function() return Pabrik.wantHarvest(o) end or nil,
     }
+end
+
+-- Baca pohon aktual setiap 250 ms. Countdown hanya untuk status, bukan
+-- alasan menahan panen sampai satu sesi break / tanam habis.
+function Pabrik.wantHarvest(o)
+    if not o.live() or not alive() or Pabrik.Traveling then return false end
+    if invCount(o.seed) >= CAP - 20 or invCount(o.block) >= CAP - 20 then return false end
+    local now, w = os.clock(), Refs.World
+    if not w then return false end
+    if now < (o.harvestRetryAt or 0) then return false end
+    if o.readyWorld ~= w or o.readyWhole ~= o.whole or now >= (o.readyCheckAt or 0) then
+        o.readyCount = readyTreeCount(o.whole, nil, Pabrik.Skip)
+        o.readyWorld, o.readyWhole, o.readyCheckAt = w, o.whole, now + 0.25
+    end
+    return (o.readyCount or 0) > 0
 end
 
 -- Break block di posisi pabrik (pakai Auto Farm dengan tile & block pabrik)
 local function pabrikBreak(o)
+    if Pabrik.wantHarvest(o) then return true, "harvest" end
     if os.clock() < (Pabrik.BreakFailUntil or 0) then return false end
     local s = playerState()
     if not s then return false end
     local hx, hy = startNode(s)
     if hx ~= Pabrik.BreakX or hy ~= Pabrik.BreakY then
         Pabrik.Status = ("Jalan ke posisi break (%d,%d)"):format(Pabrik.BreakX, Pabrik.BreakY)
-        if not walkTo(Pabrik.BreakX, Pabrik.BreakY, 45) then
+        if not walkTo(Pabrik.BreakX, Pabrik.BreakY, 45, function()
+            return not o.live() or Pabrik.wantHarvest(o)
+        end) then
+            if Pabrik.wantHarvest(o) then return true, "harvest" end
+            if not o.live() then return false end
             Pabrik.Status = "Gagal jalan ke posisi break, dicoba lagi nanti"
             Pabrik.BreakFailUntil = os.clock() + 30
             return false
         end
     end
     if not o.live() then return false end
+    if Pabrik.wantHarvest(o) then return true, "harvest" end
     State.Override = { offsets = Pabrik.Tiles, block = o.block, mode = "Place + Break" }
     State.Quiet = true
     table.clear(HitCount)
@@ -6264,13 +6302,20 @@ local function pabrikBreak(o)
     local id = State.RunId
     local acts0 = State.Placed + State.Broken
     local lastActs, lastActAt = acts0, os.clock()
+    local harvestInterrupt = false
     task.spawn(function() -- pengawas sesi break
         while State.Running and State.RunId == id do
-            task.wait(1)
+            task.wait(0.25)
+            if not State.Running or State.RunId ~= id then break end
             local sd = invCount(o.seed)
             local acts = State.Placed + State.Broken
             if acts ~= lastActs then lastActs, lastActAt = acts, os.clock() end
-            -- break terus sampai block habis (tanpa batas waktu sesi)
+            if Pabrik.wantHarvest(o) then
+                harvestInterrupt = true
+                Pabrik.Status = "Pohon siap, jeda break lalu panen"
+                State.Running = false
+                break
+            end
             if not o.live() or sd >= CAP
                 or (o.drop and Pabrik.Drop and sd >= Pabrik.DropAt)
                 or (o.breakMode ~= "always" and sd >= BOOT_SEEDS)
@@ -6285,11 +6330,11 @@ local function pabrikBreak(o)
     State.Running = false
     State.Override = nil
     State.Quiet = false
-    if State.Placed + State.Broken == acts0 and invCount(o.block) > 0 then
+    if not harvestInterrupt and State.Placed + State.Broken == acts0 and invCount(o.block) > 0 then
         Pabrik.BreakFailUntil = os.clock() + 60
         Pabrik.Status = "Sesi break tanpa aksi: cek posisi & tile break (dicoba lagi 1 menit)"
     end
-    return true
+    return true, harvestInterrupt and "harvest" or nil
 end
 
 -- "WORLD" / "WORLD:ID" / ":ID" -> nama world, id pintu
@@ -6490,6 +6535,12 @@ local function pabrikStep(o)
         return "drop"
     end
 
+    if o.phase ~= "panen" and Pabrik.wantHarvest(o) then
+        o.phase = "panen"
+        Pabrik.Phase = "PANEN"
+        Pabrik.Status = "Pohon siap, lanjut panen"
+    end
+
     if o.phase == "panen" then
         -- 1x panen bisa kena beberapa pohon, jadi sisakan ruang ~20 item
         if blocks >= CAP - 20 or seeds >= CAP - 20 then
@@ -6499,6 +6550,12 @@ local function pabrikStep(o)
         FC = pabrikCfg(o, true, false)
         local r = fieldStep()
         if r == "idle" then
+            o.readyCheckAt = 0 -- target yang baru dilewati harus dibaca ulang
+            if (o.readyCount or 0) > 0 then
+                -- Jalur belum tersedia: beri fase lain kesempatan, lalu cek lagi.
+                o.harvestRetryAt = os.clock() + 1
+                Reach = nil
+            end
             o.idleAt = os.clock()
             o.phase = "tanam"
             return "next"
@@ -6510,6 +6567,7 @@ local function pabrikStep(o)
         if seeds > 0 then
             FC = pabrikCfg(o, false, true)
             local r = fieldStep()
+            if r == "harvest" then o.phase = "panen"; return "next" end
             if r ~= "idle" then return r end
         end
         o.phase = "break"
@@ -6524,10 +6582,16 @@ local function pabrikStep(o)
             local _, nxt = readyTreeCount(o.whole)
             want = blocks > 0 and seeds < BOOT_SEEDS and nxt == nil
         end
-        if want and breakReady() and pabrikBreak(o) then
-            -- block masih ada: lanjut break (habiskan dulu), block habis: tanam
-            o.phase = (o.breakMode == "always" and invCount(o.block) > 0) and "break" or "tanam"
-            return "break"
+        if want and breakReady() then
+            local ok, why = pabrikBreak(o)
+            if ok then
+                if why == "harvest" then
+                    o.phase = "panen"
+                    return "next"
+                end
+                o.phase = (o.breakMode == "always" and invCount(o.block) > 0) and "break" or "tanam"
+                return "break"
+            end
         end
         o.phase = "tunggu"
         return "next"
@@ -6535,10 +6599,6 @@ local function pabrikStep(o)
 
     -- tunggu
     local n, nxt = readyTreeCount(o.whole)
-    if n > 0 and os.clock() - (o.idleAt or 0) > 5 then
-        o.phase = "panen"
-        return "next"
-    end
     if o.breakMode == "always" and blocks > 0 and breakReady() then
         o.phase = "break"
         return "next"
@@ -6600,7 +6660,7 @@ local function pabrikLoop(runId)
             else
                 Pabrik.Status = "Menunggu..."
             end
-            if not waitAuto(1000) then break end
+            if not waitAuto(250) then break end
         end
     end
     releaseInput()
@@ -8906,7 +8966,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.8 | TEST r13",
+    Author = "v5.9.9 | TEST r14",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -11553,7 +11613,7 @@ do (function()
     safe(function()
         UI.PabrikToggle = pCtl:Toggle({
             Title = "Jalankan Pabrik",
-            Desc = "Break -> tanam -> panen -> break lagi, seed lebihan di-drop",
+            Desc = "Pohon ready diprioritaskan; lanjut tanam / break dan drop seed lebihan",
             Value = false,
             Callback = function(on)
                 if on then Pabrik.start() elseif Pabrik.Running then Pabrik.stop() end

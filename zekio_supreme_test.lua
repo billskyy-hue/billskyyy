@@ -387,8 +387,8 @@ I18N.EN = {
         "Also used by Clear, Farmer, Splice & Factory. Too far may be rejected by the server",
     ["Buka Grid Tile"] = "Open Tile Grid",
     ["Break 3 blok"] = "Break 3 blocks",
-    ["Pilih 3 tile di Grid. Pukulan biasa mengikuti Speed Break; Rayman memakai pola segaris"] =
-        "Select 3 Grid tiles. Normal punches follow Break Speed; Rayman uses a line pattern",
+    ["Tangan biasa: 3 target dimulai bersamaan. Speed Break menjadi jeda antar kelompok"] =
+        "Normal fist: start 3 targets together. Break Speed is the delay between groups",
     ["Jumlah target bergantian saat Break 3 blok dimatikan"] = "Targets in rotation when Break 3 blocks is off",
     ["Kotak 5x5, tengah = karakter"] = "5x5 grid, center = character",
     -- Clear
@@ -2536,7 +2536,8 @@ local function updateStatus()
         .. "\nBlock    : " .. (sel and (itemName(sel) .. " x" .. invCount(sel)) or "-")
         .. "\nKarakter : " .. (px and ("(" .. px .. "," .. py .. ")") or "tidak di world")
         .. "\nTile     : " .. offsetsText()
-        .. "\nBreak    : " .. (State.TripleBreak and "3 blok/rangkaian" or "bergantian")
+        .. "\nBreak    : " .. (State.TripleBreak and "tes burst 3 target" or "bergantian")
+        .. (State.TripleBreak and State.BurstStatus and ("\nTes burst : " .. State.BurstStatus) or "")
         .. "\nPlace/Break/Collect : " .. State.Placed .. " / " .. State.Broken .. " / " .. State.Collected
         .. (State.CollectFail > 0 and (" (ditolak " .. State.CollectFail .. ")") or "")
         .. "\nCollect r3 [" .. tostring(State.CollectMode) .. "]: " .. tostring(Drops.Status or "menunggu koneksi")
@@ -2776,9 +2777,100 @@ function Breaker.targets(px, py, active)
     return hits, nil
 end
 
+-- Mode tes tangan biasa: antrekan semua panggilan pada giliran scheduler yang sama.
+-- Tidak mengubah cooldown game, damage, atau tile untuk memalsukan hasil burst.
+function Breaker.burst(hits)
+    local used, hit, broke = {}, false, false
+    local runId = State.RunId
+    local function live()
+        return State.Running and alive() and not State.DropPause and State.RunId == runId
+    end
+    if #hits == 0 or not live() then return used, hit, broke end
+    if type(Refs.Punch) ~= "function" then
+        State.BurstStatus = "Fungsi pukul game belum terhubung; tekan Hubungkan ke game"
+        State.LastAction = State.BurstStatus
+        if State.Override then Pabrik.Status = State.BurstStatus end
+        State.Running = false
+        return used, hit, broke
+    end
+
+    -- Semua block yang baru dipasang harus siap SEBELUM tiga tugas dimulai.
+    -- tryBreak tidak perlu menunggu umur place secara terpisah pada tiap tile.
+    local now, delay = os.clock(), 0
+    for _, a in ipairs(hits) do
+        local at = PlacedAt[a.x .. "," .. a.y]
+        if at then delay = math.max(delay, PLACE_GUARD - (now - at)) end
+    end
+    if delay > 0 then task.wait(delay + 0.002) end
+    if not live() then return used, hit, broke end
+
+    local batch = { open = true, pending = #hits, results = {}, threads = {}, before = {} }
+    local t0 = os.clock()
+    for i, a in ipairs(hits) do
+        batch.before[i] = { fg = tileAt("fg", a.x, a.y), bg = tileAt("bg", a.x, a.y) }
+        batch.threads[i] = task.defer(function()
+            if batch.open and live() then
+                local entry = { at = os.clock(), called = true }
+                batch.results[i] = entry
+                entry.ok, entry.result = pcall(tryBreak, a.x, a.y)
+                entry.finished = true
+            end
+            batch.pending = batch.pending - 1
+        end)
+    end
+    while batch.pending > 0 and live() and os.clock() - t0 < 3 do task.wait() end
+    local timedOut = batch.pending > 0 and live()
+    batch.open = false
+    if batch.pending > 0 and type(task.cancel) == "function" then
+        for _, thread in pairs(batch.threads) do pcall(task.cancel, thread) end
+    end
+
+    local firstAt, lastAt, changed, errors = nil, nil, 0, 0
+    for i, a in ipairs(hits) do
+        local entry = batch.results[i]
+        if entry and entry.called then
+            firstAt = firstAt and math.min(firstAt, entry.at) or entry.at
+            lastAt = lastAt and math.max(lastAt, entry.at) or entry.at
+            a.n = a.n + 1
+            a.used = true
+            used[#used + 1] = a
+            if entry.finished then
+                local r = entry.ok and entry.result or nil
+                if r then hit = true end
+                if r == "broke" then broke = true end
+                if not entry.ok then errors = errors + 1 end
+                if r == nil or a.n > 80 or (r == "broke" and not breakableAt(a.x, a.y)) then a.done = true end
+            end
+        end
+    end
+    if hit and live() then
+        local gap = math.max(200, tonumber(State.BreakMs) or 220) / 1000
+        local rest = gap - (os.clock() - t0)
+        if rest > 0 then task.wait(rest) end
+    end
+    for i, a in ipairs(hits) do
+        local before = batch.before[i]
+        if before.fg ~= tileAt("fg", a.x, a.y) or before.bg ~= tileAt("bg", a.x, a.y) then
+            changed = changed + 1
+        end
+    end
+    State.BurstStatus = ("panggilan %d/%d | selisih awal %.1f ms | tile berubah %d/%d"):format(
+        #used, #hits, firstAt and (lastAt - firstAt) * 1000 or 0, changed, #hits)
+    if errors > 0 then State.BurstStatus = State.BurstStatus .. " | error " .. errors end
+    if timedOut then
+        State.BurstStatus = State.BurstStatus .. " | fungsi pukul belum selesai, tes dihentikan"
+        State.Running = false
+        State.LastAction = State.BurstStatus
+        if State.Override then Pabrik.Status = State.BurstStatus end
+    end
+    State.LastBreakBatch = #used
+    return used, hit, broke
+end
+
 -- Satu rangkaian: tiap tile mendapat satu pukulan, lalu semua yang belum habis
 -- tetap masuk antrean. Jeda dihitung dari pukulan terakhir, termasuk antar rangkaian.
 function Breaker.hitRound(hits, rayDir)
+    if Breaker.triple() and not rayDir then return Breaker.burst(hits) end
     local used, hit, broke = {}, false, false
     if #hits == 0 or not State.Running or not alive() or State.DropPause then return used, hit, broke end
     local gap = math.max(200, tonumber(State.BreakMs) or 220) / 1000
@@ -2858,8 +2950,8 @@ local function farmLoop(runId)
         end
 
         -- 2) Pukul tile sampai habis (block depan lalu background).
-        --    Break 3 blok: satu pukulan per tile dalam satu rangkaian.
-        --    Rayman memakai pola segaris; pukulan biasa tetap mengikuti jeda game.
+        --    Tangan biasa: tiga panggilan pukulan dimulai bersamaan (versi tes).
+        --    Rayman memakai pola segaris; hasil burst ditampilkan sebagai perubahan tile.
         if doBreak then
             local K = Breaker.count()
             local nextI, active = 1, {}
@@ -8883,7 +8975,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.2 | TEST Break 3 r7",
+    Author = "v5.9.3 | TEST Burst 3 r8",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -8995,7 +9087,7 @@ end)
 safe(function()
     Box.FarmCtl:Toggle({
         Title = "Break 3 blok",
-        Desc = "Pilih 3 tile di Grid. Pukulan biasa mengikuti Speed Break; Rayman memakai pola segaris",
+        Desc = "Tangan biasa: 3 target dimulai bersamaan. Speed Break menjadi jeda antar kelompok",
         Value = State.TripleBreak,
         Callback = function(on) State.TripleBreak = on end,
     })
@@ -11618,7 +11710,7 @@ do (function()
     safe(function()
         pBreak:Toggle({
             Title = "Break 3 blok",
-            Desc = "Pilih 3 tile di Grid. Pukulan biasa mengikuti Speed Break; Rayman memakai pola segaris",
+            Desc = "Tangan biasa: 3 target dimulai bersamaan. Speed Break menjadi jeda antar kelompok",
             Value = Pabrik.TripleBreak,
             Callback = function(on)
                 Pabrik.TripleBreak = on
@@ -11699,6 +11791,7 @@ do (function()
                     or "belum diatur", countKeys(Pabrik.Tiles)) .. (Pabrik.TripleBreak and " | mode 3 blok" or ""),
                 ("Drop   : %s | sisakan %d, drop saat >= %d"):format(Pabrik.Drop and dropAt or "mati", Pabrik.Keep, Pabrik.DropAt),
                 ("Hasil  : panen %d | tanam %d | di-drop %d"):format(Pabrik.Harvested, Pabrik.Planted, Pabrik.Dropped),
+                "Tes burst : " .. (Pabrik.TripleBreak and (State.BurstStatus or "belum ada percobaan") or "mati"),
                 "Aksi   : " .. Pabrik.Status,
             }, "\n")
             if UI.PabrikStatus and txt ~= Pabrik.Shown then

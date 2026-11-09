@@ -4422,7 +4422,8 @@ end
 
 -- Datangi 1 drop sampai terambil (berdiri di tile drop-nya; kalau tile itu tidak bisa dipijak,
 -- misal lubang tangga: berdiri tepat di bawahnya lalu lompat sekali). Hasil: true = terambil.
-function Move.visitDrop(d)
+function Move.visitDrop(d, cancel)
+    if cancel and cancel() then return false, "cancelled" end
     local w = Refs.World
     local s = playerState()
     if not w or not s then return false, "nopath" end
@@ -4437,14 +4438,16 @@ function Move.visitDrop(d)
     end
     if not path then path = astar(sx, sy, goal, tx, ty, 1.2, false) end
     if not path then return false, "nopath" end
+    if cancel and cancel() then return false, "cancelled" end
     if #path > 0 then
-        local ok = followPath(path)
+        local ok, why = followPath(path, cancel)
         releaseInput()
-        if not ok then return false, "nopath" end
+        if not ok then return false, why == "cancelled" and "cancelled" or "nopath" end
     end
     local ping = 0.1
     pcall(function() ping = LocalPlayer:GetNetworkPing() end)
     waitNearDrops(math.clamp(0.6 + 3 * ping, 1, 2.5))
+    if cancel and cancel() then return false, "cancelled" end
     local function left() return (d.n or 0) > 0 and Drops.key(Drops.list, d) ~= nil end
     local cur = playerState()
     if left() and cur and cur.grounded and abs(d.x - cur.x) <= 0.9 and d.y < cur.y - 0.9 and d.y > cur.y - 2.6 then
@@ -5758,6 +5761,7 @@ local function updateFarmerStatus()
         .. "\nPanen   : " .. Farmer.Harvested .. "  | tanam: " .. Farmer.Planted .. "  | collect: " .. State.Collected
         .. "\nSeed    : " .. (seed and (itemName(seed) .. " x" .. invCount(seed)) or "-")
         .. "\nMode    : semua tile terjangkau per putaran"
+        .. "\nIsi seed: " .. (Farmer.RefillStatus or "otomatis saat seed pilihan habis")
         .. "\nPohon   : " .. (Refs.Trees and "terbaca" or "TIDAK terbaca (harvest mati)")
         .. "\nKontrol : " .. AutoInput.status()
         .. "\nPijakan : " .. blockText(Farmer.UseBlock, Farmer.ScaffoldId)
@@ -5792,6 +5796,93 @@ function Move.airCheck(s)
     end
 end
 
+-- Seed pilihan habis: cari drop seed yang sama di seluruh world. Berhasil
+-- hanya kalau jumlah di tas bertambah, bukan sekadar berhasil berjalan.
+function Farmer.refillSeed(seed)
+    local w, cfg = Refs.World, FC
+    if not Farmer.Running or not Farmer.Plant or not seed or Farmer.SeedId ~= seed
+        or not w or not alive() then return "cancelled" end
+    if invCount(seed) > 0 then return "ready" end
+    if Refs.Inv then
+        local okr, room = pcall(function() return Refs.Inv:room(seed) end)
+        if okr and type(room) == "number" and room <= 0 then
+            Farmer.RefillStatus = "Tas penuh untuk seed pilihan; kosongkan slot dulu"
+            return "none"
+        end
+    end
+    local now = os.clock()
+    if Farmer.RefillWorld ~= w or Farmer.RefillFor ~= seed then
+        Farmer.RefillWorld, Farmer.RefillFor = w, seed
+        Farmer.RefillNext, Farmer.RefillSkip = 0, {}
+    end
+    if now < (Farmer.RefillNext or 0) then return "none" end
+    Farmer.RefillNext = now + 1
+    if not Drops.list then pcall(findDropRefs) end -- pencarian ringan, tanpa getgc
+    if not Drops.list then
+        Farmer.RefillStatus = "Daftar drop belum terbaca; tekan Hubungkan ke game"
+        return "none"
+    end
+    local s = playerState()
+    if not s or s.dead then return "cancelled" end
+    local best, distance
+    for _, d in ipairs(Drops.snapshot()) do
+        local retryAt = Farmer.RefillSkip[d.uid]
+        if d.id == seed and canTry(d, now) and (not retryAt or now >= retryAt)
+            and d.x >= 0 and d.y >= 0 and d.x < w.w and d.y < w.h
+            and not solidAt(floor(d.x), floor(d.y)) then
+            local dx, dy = d.x - s.x, d.y - (s.y - 0.475)
+            local dd = dx * dx + 4 * dy * dy
+            if not distance or dd < distance then best, distance = d, dd end
+        end
+    end
+    if not best then
+        Farmer.RefillStatus = "Menunggu drop " .. itemName(seed) .. " yang bisa diambil"
+        return "none"
+    end
+    local function live()
+        return Farmer.Running and Farmer.Plant and Farmer.SeedId == seed
+            and Refs.World == w and FC == cfg and alive()
+    end
+    local function cancel() return not live() or invCount(seed) > 0 end
+    local function takeNearby()
+        if not live() or State.CollectMode ~= "Remote" or not canTry(best, os.clock()) then return end
+        local cur = playerState()
+        local R = (State.CollectRadius or 3) + 0.2
+        if cur and abs(best.x - cur.x) <= R and abs(best.y - (cur.y - 0.475)) <= R then
+            pcall(takeDrop, best) -- seed ini saja, termasuk jika Auto Collect mati
+        end
+    end
+    local before = invCount(seed)
+    Farmer.RefillStatus = ("Ambil %s di (%d,%d)"):format(itemName(seed), floor(best.x), floor(best.y))
+    Farmer.Status = Farmer.RefillStatus
+    takeNearby()
+    local ok = true
+    if live() and invCount(seed) <= before then
+        ok = pcall(Move.visitDrop, best, cancel)
+    end
+    releaseInput()
+    if not live() then return "cancelled" end
+    takeNearby()
+    local untilAt = os.clock() + 0.6
+    while live() and invCount(seed) <= before and best.taking and os.clock() < untilAt do
+        task.wait(0.05)
+    end
+    if not live() then return "cancelled" end
+    local got = invCount(seed) - before
+    if got > 0 then
+        Farmer.Refilled = (Farmer.Refilled or 0) + got
+        Farmer.RefillNext = 0
+        Farmer.RefillStatus = ("Terambil %d %s; lanjut tanam"):format(got, itemName(seed))
+        Farmer.Status = Farmer.RefillStatus
+        return "picked"
+    end
+    Farmer.RefillSkip[best.uid] = os.clock() + 3
+    Farmer.RefillStatus = ok and "Seed belum masuk tas; coba drop lain sebentar lagi"
+        or "Gagal mendatangi seed; coba drop lain sebentar lagi"
+    Farmer.Status = Farmer.RefillStatus
+    return "waiting"
+end
+
 local function fieldStep()
     local w = Refs.World
     local s = playerState()
@@ -5812,6 +5903,12 @@ local function fieldStep()
     if FC.yieldHarvest and FC.yieldHarvest() then return "harvest" end
     if farmerWorkInReach(s) > 0 then return "work" end
     if FC.yieldHarvest and FC.yieldHarvest() then return "harvest" end
+    if FC.batch and FC.plant and FC.seed and fcSeeds() <= 0 then
+        local refill = Farmer.refillSeed(FC.seed)
+        if refill == "picked" or refill == "ready" then return "work" end
+        if refill == "waiting" then return "refill" end
+        if refill == "cancelled" then return "wait" end
+    end
     local R = FC.batch and math.max(FC.harvest and punchReach() or 0, FC.plant and buildReach() or 0) - 0.35
         or farmReach() - 0.35
     local useBlock = scaffoldId() ~= nil
@@ -5889,7 +5986,8 @@ local function farmerLoop()
                 parts[#parts + 1] = nextReady and ("pohon siap ±" .. math.ceil(nextReady) .. " dtk") or "tidak ada pohon"
             end
             if Farmer.Plant then
-                parts[#parts + 1] = (seedCount() <= 0) and "seed habis / belum dipilih" or "tidak ada tempat tanam"
+                parts[#parts + 1] = (seedCount() <= 0)
+                    and (Farmer.RefillStatus or "seed habis / belum dipilih") or "tidak ada tempat tanam"
             end
             Farmer.Status = "Menunggu: " .. table.concat(parts, ", ")
             if not waitAuto(250) then break end
@@ -5942,6 +6040,8 @@ local function startFarmer()
     table.clear(Farmer.Row)
     Farmer.DropOffUntil = 0
     Farmer.BatchHarvest, Farmer.BatchPlanted = 0, 0
+    Farmer.RefillNext, Farmer.RefillSkip, Farmer.RefillWorld, Farmer.RefillFor = 0, {}, nil, nil
+    Farmer.RefillStatus = "Otomatis ambil seed pilihan saat habis"
     Farmer.Status = "Mulai..."
     Farmer.Running = true
     autoBegin()
@@ -9156,7 +9256,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.11 | TEST r16",
+    Author = "v5.9.12 | TEST r17",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -9450,7 +9550,7 @@ end)
 safe(function()
     Box.FarmerCtl:Toggle({
         Title = "Auto Plant",
-        Desc = "Tanam di atas block yang kosong",
+        Desc = "Tanam semua tile valid; seed habis otomatis ambil drop seed yang sama",
         Value = Farmer.Plant,
         Callback = function(on) Farmer.Plant = on end,
     })

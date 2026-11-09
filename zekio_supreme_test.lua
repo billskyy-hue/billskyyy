@@ -2192,8 +2192,8 @@ local function breakableAt(x, y)
 end
 
 -- Pukul 1 kali. Hasil: "hit" / "broke" / nil
--- includeBg = ikut pecah background
-local function tryBreak(x, y, includeBg)
+-- includeBg = ikut pecah background; nativeOnly = jangan pakai hitungan cadangan
+local function tryBreak(x, y, includeBg, nativeOnly)
     if includeBg == nil then includeBg = State.BreakBackground end
     local key = x .. "," .. y
     local fg = tileAt("fg", x, y)
@@ -2215,11 +2215,16 @@ local function tryBreak(x, y, includeBg)
         PlacedAt[key] = nil
     end
 
-    if Refs.Punch then
+    -- Clear harus memilih ulang kalau isi tile berubah saat menunggu pijakan.
+    if nativeOnly and (tileAt("fg", x, y) ~= fg or tileAt(layer, x, y) ~= id) then
+        return nil, "tile-changed"
+    end
+
+    if type(Refs.Punch) == "function" then
         local ok, err = pcall(Refs.Punch, x, y, State.MutePunch or nil, nil)
         if not ok then
             State.LastAction = "Error pukul: " .. tostring(err)
-            return nil
+            return nil, "punch-error"
         end
         if State.Visual then Anim.swing(x, y, "punch") end
         if tileAt(layer, x, y) ~= id then
@@ -2230,6 +2235,11 @@ local function tryBreak(x, y, includeBg)
         end
         State.LastAction = "Pukul " .. itemName(id) .. " (" .. x .. "," .. y .. ")"
         return "hit"
+    end
+
+    if nativeOnly then
+        State.LastAction = "Fungsi pukul game terputus"
+        return nil, "native-missing"
     end
 
     -- Cadangan: hitung pukulan sendiri
@@ -4624,6 +4634,11 @@ local function clearCanBreak(id)
     local it = ItemDB[id]
     if not it then return false end
     if it.lock or it.area or it.guildLock or it.vend or it.display then return false end
+    -- Katalog baru bisa menyimpan nama lock tanpa flag lama. Jangan cocokkan
+    -- substring "lock" saja karena "Block" dan "Clock" juga mengandungnya.
+    local name = string.lower(tostring(it.name or "")):gsub("[_%-%s]+", " ")
+    if it.kind == "lock" or name:find("%f[%a]lock%f[%A]")
+        or name:gsub("%s", "") == "worldlock" then return false end
     local h = (it.kind == "seed") and 20 or it.hits
     if type(h) == "number" and h > 0 then return true end
     local w = Refs.World
@@ -4725,10 +4740,10 @@ local function bandTargets(top, bottom, dir, filter)
             if clearLayerAt(x, y) and not skipped(Clear.Skip, idx, now) then
                 if filter and not filter[idx] then
                     skipTile(Clear.Skip, idx, 60) -- di seberang jurang / tidak ada jalan
-                elseif canWorkAt(x, y) then
-                    list[#list + 1] = { x = x, y = y, idx = idx }
                 else
-                    skipTile(Clear.Skip, idx, 300) -- tidak ada izin
+                    -- Jangan saring lagi memakai asumsi API mayBuild/builderOk.
+                    -- Target ini tetap lewat fungsi pukul asli, bukan setTile.
+                    list[#list + 1] = { x = x, y = y, idx = idx }
                 end
             end
         end
@@ -4755,14 +4770,10 @@ local function clearInReach(s, bottom, dir)
             if stateReaches(s, tx, ty, R) then
                 local idx = ty * W + tx
                 if not skipped(Clear.Skip, idx, now) and clearLayerAt(tx, ty) then
-                    if canWorkAt(tx, ty) then
-                        list[#list + 1] = {
-                            x = tx, y = ty, idx = idx,
-                            support = (ty == footRow and tx >= colA and tx <= colB),
-                        }
-                    else
-                        skipTile(Clear.Skip, idx, 300)
-                    end
+                    list[#list + 1] = {
+                        x = tx, y = ty, idx = idx,
+                        support = (ty == footRow and tx >= colA and tx <= colB),
+                    }
                 end
             end
         end
@@ -4798,8 +4809,18 @@ local function clearBreakTile(t)
     while Clear.Running and alive() do
         layer, id = clearLayerAt(x, y)
         if not layer then return end
-        local r = tryBreak(x, y, Clear.IncludeBg)
+        local r, reason = tryBreak(x, y, Clear.IncludeBg, true)
+        if reason == "native-missing" then
+            stopClear("Fungsi pukul game terputus. Tekan 'Hubungkan ke game', lalu mulai lagi")
+            return
+        end
         if r == nil then
+            if reason == "tile-changed" then
+                Clear.Status = ("Tile (%d,%d) berubah, periksa ulang"):format(x, y)
+                return
+            end
+            Clear.Status = ("Lewati (%d,%d): %s"):format(x, y,
+                reason == "punch-error" and State.LastAction or "tile belum bisa dipukul")
             skipTile(Clear.Skip, idx, 60)
             return
         end
@@ -4818,6 +4839,7 @@ local function clearBreakTile(t)
             hits += 1
             Clear.Status = "Pukul " .. itemName(id) .. " (" .. x .. "," .. y .. ")"
             if hits > maxHits then
+                Clear.Status = ("Lewati (%d,%d): tile belum berubah setelah %d pukulan"):format(x, y, hits)
                 skipTile(Clear.Skip, idx, 45)
                 return
             end
@@ -4871,6 +4893,7 @@ local function updateClearStatus()
         .. "\nSisa     : " .. (Clear.Remaining >= 0 and tostring(Clear.Remaining) or "-")
         .. "  | dilewati: " .. skippedCount(Clear.Skip)
         .. "\nPijakan  : " .. blockText(Clear.UseBlock, Clear.ScaffoldId) .. "  | dipasang: " .. Move.Placed
+        .. "\nLock     : dilindungi | pukul lewat fungsi game"
         .. "\nAksi     : " .. Clear.Status
     if txt == lastClearText then return end
     lastClearText = txt
@@ -4883,6 +4906,10 @@ local function clearLoop()
     local idle, lastUi, lastCount = 0, 0, -10
     while Clear.Running and alive() do
         task.wait()
+        if type(Refs.Punch) ~= "function" then
+            stopClear("Fungsi pukul game terputus. Tekan 'Hubungkan ke game', lalu mulai lagi")
+            return
+        end
         local now = os.clock()
         if now - lastCount > 3 then
             lastCount = now
@@ -8879,7 +8906,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.7 | TEST r12",
+    Author = "v5.9.8 | TEST r13",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",

@@ -5425,7 +5425,7 @@ local function farmerWorkInReach(s)
                         local ra = treeReadyAt(tx, ty, id)
                         if ra and st >= ra and Move.los(bx, by, tx, ty) then
                             if canWorkAt(tx, ty) then
-                                harvest[#harvest + 1] = { x = tx, y = ty, idx = idx, id = id }
+                                harvest[#harvest + 1] = { x = tx, y = ty, idx = idx, id = id, readyAt = ra }
                             else
                                 skipTile(FC.skip, idx, 120)
                             end
@@ -5442,7 +5442,10 @@ local function farmerWorkInReach(s)
         if a.x ~= b.x then return a.x < b.x end
         return a.y < b.y
     end
-    table.sort(harvest, byX)
+    table.sort(harvest, function(a, b)
+        if a.readyAt ~= b.readyAt then return a.readyAt < b.readyAt end
+        return byX(a, b)
+    end)
     table.sort(plant, byX)
 
     local done, got = 0, 0
@@ -5491,7 +5494,7 @@ local function farmerWorkInReach(s)
 end
 
 -- Cari target + kapan pohon berikutnya siap.
---   Panen : pohon siap terdekat (didahulukan).
+--   Panen : pohon yang paling awal matang; jarak jadi pembanding kalau waktunya sama.
 --   Tanam : rapi per baris. Selesaikan 1 baris dulu (baris yang sedang dikerjakan,
 --           atau baris terdekat dengan karakter), dari tile paling kiri ke kanan.
 local function farmerScan(px, py, maxN, filter)
@@ -5501,6 +5504,11 @@ local function farmerScan(px, py, maxN, filter)
     local now = os.clock()
     local st = workspace:GetServerTimeNow()
     local nextReady = nil
+    local function earlier(a, b)
+        if a.readyAt ~= b.readyAt then return a.readyAt < b.readyAt end
+        if a.d ~= b.d then return a.d < b.d end
+        return a.idx < b.idx
+    end
     local doPlant = FC.plant and fcSeeds() > 0
     local rows = {} -- [y] = daftar tempat tanam di baris itu
     local scanned = 0
@@ -5517,11 +5525,12 @@ local function farmerScan(px, py, maxN, filter)
                             if not filter or filter[idx] then
                                 local dx, dy = x - px, (y - py) * 1.3
                                 local d = dx * dx + dy * dy
-                                if #best < maxN or d < best[#best].d then
+                                local target = { x = x, y = y, idx = idx, d = d, kind = "harvest", readyAt = ra }
+                                if #best < maxN or earlier(target, best[#best]) then
                                     if canWorkAt(x, y) then
                                         local pos = #best + 1
-                                        while pos > 1 and best[pos - 1].d > d do pos -= 1 end
-                                        table.insert(best, pos, { x = x, y = y, idx = idx, d = d, kind = "harvest" })
+                                        while pos > 1 and earlier(target, best[pos - 1]) do pos -= 1 end
+                                        table.insert(best, pos, target)
                                         if #best > maxN then best[#best] = nil end
                                     else
                                         skipTile(FC.skip, idx, 120)
@@ -6185,6 +6194,8 @@ local function blockOfSeed(seed)
     return nil
 end
 
+-- Hitungan menunggu dan tile acuan memakai waktu matang paling awal yang
+-- masih ada. Menanam tile baru tidak mereset waktu tile sebelumnya.
 local function readyTreeCount(whole, only, skip)
     local w = Refs.World
     if not w then return 0 end
@@ -6197,23 +6208,29 @@ local function readyTreeCount(whole, only, skip)
         x1 = math.min(w.w - 1, math.max(Land.X0, Land.X1))
         y0, y1 = math.max(0, rows[1] - 1), rows[#rows]
     end
-    local n, nxt = 0, nil
+    local n, nxt, first, missing = 0, nil, nil, 0
     for y = y0, y1 do
         for x = x0, x1 do
             local id = fgIdAt(x, y)
             if id ~= 0 and (not only or id == only) then
                 local ra = treeReadyAt(x, y, id)
                 if ra then
+                    local idx = y * w.w + x
+                    if not first or ra < first.at or (ra == first.at and idx < first.idx) then
+                        first = { x = x, y = y, id = id, idx = idx, at = ra }
+                    end
                     if st >= ra then
                         if not skip or not skipped(skip, y * w.w + x) then n += 1 end
                     elseif not nxt or ra - st < nxt then
                         nxt = ra - st
                     end
+                elseif ItemDB[id] and ItemDB[id].kind == "seed" then
+                    missing += 1
                 end
             end
         end
     end
-    return n, nxt
+    return n, nxt, first, missing
 end
 
 ---------------------------------------------------------------------
@@ -6615,6 +6632,17 @@ local function waitText(sec)
     sec = math.max(0, math.ceil(sec or 0))
     if sec >= 60 then return ("%dm %dd"):format(sec // 60, sec % 60) end
     return sec .. " dtk"
+end
+
+function Pabrik.harvestStatus()
+    if not Refs.World then return "Belum masuk world" end
+    if not Refs.Trees then return "Waktu pohon belum terbaca" end
+    local n, _, first, missing = readyTreeCount(Pabrik.WholeWorld)
+    local suffix = (missing or 0) > 0 and (" | waktu %d pohon belum terbaca"):format(missing) or ""
+    if not first then return "Belum ada waktu pohon terbaca" .. suffix end
+    local remaining = math.max(0, first.at - workspace:GetServerTimeNow())
+    local status = n > 0 and (n .. " pohon READY") or ("siap " .. waitText(remaining))
+    return ("%s | acuan (%d,%d) %s%s"):format(status, first.x, first.y, itemName(first.id), suffix)
 end
 
 local function pabrikLoop(runId)
@@ -8966,7 +8994,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.9 | TEST r14",
+    Author = "v5.9.10 | TEST r15",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -11712,6 +11740,7 @@ do (function()
                     or "belum diatur", countKeys(Pabrik.Tiles)),
                 ("Drop   : %s | sisakan %d, drop saat >= %d"):format(Pabrik.Drop and dropAt or "mati", Pabrik.Keep, Pabrik.DropAt),
                 ("Hasil  : panen %d | tanam %d | di-drop %d"):format(Pabrik.Harvested, Pabrik.Planted, Pabrik.Dropped),
+                "Panen  : " .. Pabrik.harvestStatus(),
                 "Aksi   : " .. Pabrik.Status,
             }, "\n")
             if UI.PabrikStatus and txt ~= Pabrik.Shown then

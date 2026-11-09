@@ -34,20 +34,246 @@ local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local WorldRemotes = ReplicatedStorage:WaitForChild("WorldRemotes")
--- Remote lama (versi game sebelum ByteNet). Hanya dipakai kalau fungsi baru tidak ada.
+-- Cari dependensi tanpa menunggu satu lokasi folder selamanya.
+local Shared = (function()
+    local boot = { Modules = {}, Errors = {}, Sources = {}, Missing = {}, Version = "startup r10" }
+    local wanted = { itemdb = true, inventory = true, net = true, particles = true,
+        worldmenu = true, roles = true, sfx = true, splice = true }
+    local seen, containers, remotes, gameGui = {}, {}, nil, nil
+
+    local function note(text)
+        local f = G.__ZekioLaunchReport
+        if type(f) == "function" then pcall(f, "Startup r10: " .. text) end
+    end
+    local function field(v, k)
+        local ok, value = pcall(function() return v[k] end)
+        if ok then return value end
+    end
+    local function path(node)
+        local ok, value = pcall(function() return node:GetFullName() end)
+        return ok and tostring(value) or tostring(field(node, "Name") or "modul")
+    end
+    local function inspect(node)
+        if seen[node] then return end
+        seen[node] = true
+        local name = field(node, "Name")
+        if type(name) ~= "string" then return end
+        local key = string.lower(name)
+        if key == "worldremotes" and not remotes then remotes = node end
+        if key == "gamegui" and not gameGui then gameGui = node end
+        if not wanted[key] then return end
+        local ok, isModule = pcall(function() return node:IsA("ModuleScript") end)
+        if not (ok and isModule) then return end
+        local list = boot.Modules[key]
+        if not list then list = {}; boot.Modules[key] = list end
+        if #list < 8 then list[#list + 1] = node end
+    end
+
+    local old = ReplicatedStorage:FindFirstChild("Shared")
+    if old then
+        local ok, children = pcall(function() return old:GetChildren() end)
+        if ok then for _, node in ipairs(children) do inspect(node) end end
+    end
+    containers[#containers + 1] = ReplicatedStorage
+    containers[#containers + 1] = PlayerGui
+    local scripts = LocalPlayer:FindFirstChild("PlayerScripts")
+    if scripts then containers[#containers + 1] = scripts end
+    local okFirst, first = pcall(game.GetService, game, "ReplicatedFirst")
+    if okFirst and first then containers[#containers + 1] = first end
+    note("mencari modul yang tersedia")
+    for _, root in ipairs(containers) do
+        inspect(root)
+        local ok, descendants = pcall(function() return root:GetDescendants() end)
+        if ok and type(descendants) == "table" then
+            for i, node in ipairs(descendants) do
+                inspect(node)
+                if i % 400 == 0 then task.wait() end
+            end
+        end
+    end
+    for _, enumerate in ipairs({ getloadedmodules or false, getnilinstances or false }) do
+        if type(enumerate) == "function" then
+            local ok, nodes = pcall(enumerate)
+            if ok and type(nodes) == "table" then
+                for _, node in pairs(nodes) do inspect(node) end
+            end
+        end
+    end
+
+    function boot:FindFirstChild(name)
+        local list = self.Modules[string.lower(tostring(name))]
+        return list and list[1] or nil
+    end
+    function boot.catalog(value)
+        if type(value) ~= "table" then return false end
+        local count, checked = 0, 0
+        for id, entry in next, value do
+            checked = checked + 1
+            if type(id) == "number" and type(entry) == "table"
+                and type(rawget(entry, "name")) == "string"
+                and (type(rawget(entry, "hits")) == "number" or type(rawget(entry, "solid")) == "boolean"
+                    or type(rawget(entry, "grow")) == "number") then
+                count = count + 1
+                if count >= 3 then return true end
+            end
+            if checked >= 64 then break end
+        end
+        return false
+    end
+    function boot.network(value)
+        if type(value) ~= "table" then return false end
+        local tile, act = rawget(value, "tile"), rawget(value, "act")
+        return type(tile) == "table" and type(field(tile, "send")) == "function"
+            and type(act) == "table" and type(field(act, "send")) == "function"
+    end
+    local function requireBounded(node)
+        if not (task and type(task.spawn) == "function" and type(task.wait) == "function") then
+            return false, "task.spawn / task.wait tidak tersedia"
+        end
+        local job = { done = false }
+        local thread = task.spawn(function()
+            job.ok, job.value = pcall(require, node)
+            job.done = true
+        end)
+        local start = os.clock()
+        while not job.done and os.clock() - start < 3 do task.wait() end
+        if not job.done then
+            if type(task.cancel) == "function" then pcall(task.cancel, thread) end
+            return false, "require melewati batas 3 detik"
+        end
+        return job.ok, job.value
+    end
+    local function import(name, validate)
+        local candidates = boot.Modules[string.lower(name)] or {}
+        for _, node in ipairs(candidates) do
+            note("memuat " .. name .. " dari " .. path(node))
+            local ok, value = requireBounded(node)
+            if ok and type(value) == "table" and (not validate or validate(value)) then
+                boot.Sources[name] = path(node)
+                return true, value
+            end
+            boot.Errors[#boot.Errors + 1] = name .. " @ " .. path(node) .. ": "
+                .. (ok and "format modul tidak cocok" or tostring(value))
+        end
+        return false, nil
+    end
+    function boot:Load(name)
+        return import(name)
+    end
+
+    local itemOK
+    itemOK, boot.ItemDB = import("ItemDB", boot.catalog)
+    boot.InventoryOK, boot.Inventory = import("Inventory")
+    boot.NetOK, boot.Net = import("Net", boot.network)
+    boot.ParticlesOK, boot.Particles = import("Particles")
+    boot.MenuOK, boot.Menu = import("WorldMenu")
+    boot.RolesOK, boot.Roles = import("Roles")
+    boot.SfxOK, boot.Sfx = import("Sfx")
+    -- Modul dapat dilepas dari tree setelah dimuat. Cek bentuk data yang dipakai
+    -- script, tanpa require() semua ModuleScript yang tidak dikenal.
+    if (not itemOK or not boot.NetOK) and type(getgc) == "function" then
+        note("mencari data item / jaringan yang sudah dimuat game")
+        local ok, objects = pcall(getgc, true)
+        if ok and type(objects) == "table" then
+            local function consider(value, label)
+                if type(value) ~= "table" or value == G or value == _G or value == boot then return end
+                if not itemOK and boot.catalog(value) then
+                    itemOK, boot.ItemDB = true, value
+                    boot.Sources.ItemDB = label
+                end
+                if not boot.NetOK and boot.network(value) then
+                    boot.NetOK, boot.Net = true, value
+                    boot.Sources.Net = label
+                end
+            end
+            local checked = 0
+            for _, value in pairs(objects) do
+                consider(value, "data game yang sudah dimuat (getgc)")
+                checked = checked + 1
+                if itemOK and boot.NetOK then break end
+                if checked % 300 == 0 then task.wait() end
+            end
+            -- Beberapa executor hanya mengekspos fungsi, sementara data modulnya
+            -- masih dapat dibaca melalui upvalue fungsi game yang sudah berjalan.
+            if not itemOK or not boot.NetOK then
+                note("menelusuri data modul yang ditangkap fungsi game")
+                local bulk = getupvalues or (debug and debug.getupvalues)
+                local single = getupvalue or (debug and debug.getupvalue)
+                for _, fn in pairs(objects) do
+                    if type(fn) == "function" then
+                        local values
+                        if type(bulk) == "function" then
+                            local okValues, found = pcall(bulk, fn)
+                            if okValues and type(found) == "table" then values = found end
+                        end
+                        if values then
+                            for _, value in pairs(values) do consider(value, "upvalue fungsi game") end
+                        elseif type(single) == "function" then
+                            for i = 1, 40 do
+                                local okValue, first, second = pcall(single, fn, i)
+                                if not okValue or (first == nil and second == nil) then break end
+                                consider(second ~= nil and second or first, "upvalue fungsi game")
+                            end
+                        end
+                    end
+                    checked = checked + 1
+                    if itemOK and boot.NetOK then break end
+                    if checked % 200 == 0 then task.wait() end
+                end
+            end
+        end
+    end
+    boot.Inventory = boot.Inventory or {}
+    boot.GameGui = gameGui or PlayerGui
+    boot.Remotes = remotes
+    if not remotes then
+        boot.EmptyRemotes = Instance.new("Folder")
+        boot.EmptyRemotes.Name = "ZekioNoLegacyRemotes"
+        boot.Remotes = boot.EmptyRemotes
+    end
+    for _, entry in ipairs({ {"Inventory", boot.InventoryOK}, {"Net", boot.NetOK},
+        {"Particles", boot.ParticlesOK}, {"WorldMenu", boot.MenuOK}, {"Roles", boot.RolesOK}, {"Sfx", boot.SfxOK} }) do
+        if not entry[2] then boot.Missing[#boot.Missing + 1] = entry[1] end
+    end
+    boot.Status = "ItemDB: " .. tostring(boot.Sources.ItemDB or "belum ditemukan")
+        .. (#boot.Missing > 0 and (" | modul opsional belum terbaca: " .. table.concat(boot.Missing, ", ")) or "")
+    if not itemOK then
+        local names = {}
+        for name, candidates in pairs(boot.Modules) do
+            if #candidates > 0 then names[#names + 1] = name .. " @ " .. path(candidates[1]) end
+        end
+        table.sort(names)
+        local message = "ItemDB belum ditemukan. Script tidak akan menunggu Shared tanpa batas.\n"
+            .. "Modul terbaca: " .. (#names > 0 and table.concat(names, "; ") or "tidak ada nama modul lama")
+            .. (#boot.Errors > 0 and ("\n" .. table.concat(boot.Errors, "\n")) or "")
+        note(message)
+        pcall(function()
+            local gui = Instance.new("ScreenGui")
+            gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "ZekioStartupProblem", false, 1000000
+            gui.Parent = PlayerGui
+            local text = Instance.new("TextLabel")
+            text.Size, text.Position = UDim2.new(0.9, 0, 0.55, 0), UDim2.new(0.05, 0, 0.4, 0)
+            text.BackgroundColor3, text.TextColor3 = Color3.fromRGB(20, 22, 29), Color3.new(1, 1, 1)
+            text.TextWrapped, text.TextSize = true, 15
+            text.Text = "ZEKIO STARTUP r10\n" .. message:sub(1, 1400) .. "\nKirim screenshot kotak ini."
+            text.Parent = gui
+        end)
+        if boot.EmptyRemotes then boot.EmptyRemotes:Destroy() end
+        error(message, 0)
+    end
+    note(boot.Status)
+    return boot
+end)()
+local WorldRemotes = Shared.Remotes
 local SetTileRemote = WorldRemotes:FindFirstChild("SetTile")
-
-local ItemDB = require(Shared.ItemDB)
-local InventoryModule = require(Shared.Inventory)
-local NetOk, Net = pcall(require, Shared.Net)
-
-local GameGui = PlayerGui:WaitForChild("GameGui")
-local ParticlesOk, ParticlesModule = pcall(require, GameGui:WaitForChild("Particles"))
-local MenuModOk, MenuModule = pcall(require, GameGui:WaitForChild("WorldMenu"))
-local RolesOk, RolesModule = pcall(require, Shared:FindFirstChild("Roles"))
-local SfxOk, SfxModule = pcall(require, Shared:FindFirstChild("Sfx"))
+local ItemDB = Shared.ItemDB
+local InventoryModule = Shared.Inventory
+local NetOk, Net = Shared.NetOK, Shared.Net
+local GameGui = Shared.GameGui
+local ParticlesOk, ParticlesModule = Shared.ParticlesOK, Shared.Particles
+local MenuModOk, MenuModule = Shared.MenuOK, Shared.Menu
+local RolesOk, RolesModule = Shared.RolesOK, Shared.Roles
+local SfxOk, SfxModule = Shared.SfxOK, Shared.Sfx
 
 local WindUI = loadstring(game:HttpGet(
     "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
@@ -1591,6 +1817,7 @@ local function refsText()
         .. " | Animasi: " .. (Anim.fn and "OK" or "TIDAK")
         .. " | Dropdown: " .. (UI.DropErr and ("ERROR " .. tostring(UI.DropErr))
             or (not Refs.inventoryOK(Refs.Inv) and "menunggu inventori") or (UI.DropOk and "OK" or "-"))
+        .. "\nStartup: " .. tostring(Shared and Shared.Status or "-")
         .. "\nDeteksi inventori r2: " .. tostring(Refs.InvSource or Refs.InvScanInfo or "-")
         .. (Refs.InvError and ("\nInventori: " .. Refs.InvError) or "")
         .. (Refs.InvWatchErr and ("\nEvent inventori: " .. Refs.InvWatchErr) or "")
@@ -8758,7 +8985,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme",
     Icon = "sprout",
-    Author = "v5.9.0 | Tester",
+    Author = "v5.9.5 | Startup r10",
     Folder = "KzoyzOpus",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -10794,7 +11021,7 @@ end)() end
 --   3. Server membalas id pohon hasil splice, tile langsung diganti di layar.
 --   Hasil splice diperkirakan dulu pakai modul Splice game; kalau tidak bisa, tidak dijalankan.
 do (function()
-    local okMod, SpliceMod = pcall(require, Shared:FindFirstChild("Splice"))
+    local okMod, SpliceMod = Shared:Load("Splice")
 
     function Splice.result(a, b)
         if not (okMod and type(SpliceMod) == "table" and type(SpliceMod.result) == "function") then return nil end
@@ -12312,6 +12539,7 @@ Session.Cleanup = function()
     pcall(setLite, false)
     pcall(unhookJammer)
     AutoInput.unbindMenu()
+    if Shared.EmptyRemotes then pcall(function() Shared.EmptyRemotes:Destroy() end) end
     if Refs.World then
         if Misc.Ghost then pcall(function() Refs.World.ghost = false end) end
         if Misc.Speed ~= 100 then pcall(function() Refs.World.speedScale = 1 end) end

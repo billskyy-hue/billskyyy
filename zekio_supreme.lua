@@ -1721,6 +1721,7 @@ local function findRefs()
     local inventoryRoots = {}
     Refs.World, Refs.Inv, Refs.SetTile, Refs.State, Refs.Punch, Refs.Menu = nil, nil, nil, nil, nil, nil
     Refs.StateOwner = nil
+    Refs.Input, Refs.InputSource = nil, nil
     Refs.InvSource = nil
     Refs.Gems = nil
     Refs.Hud = nil
@@ -1753,7 +1754,7 @@ local function findRefs()
             end
             if not Refs.Menu then
                 local ok, isMenu = pcall(function()
-                    return type(rawget(v, "openBackpack")) == "function" and type(rawget(v, "ui")) == "table"
+                    return type(Refs.member(v, "openBackpack")) == "function" and type(Refs.member(v, "ui")) == "table"
                 end)
                 if ok and isMenu then Refs.Menu = v end
             end
@@ -1817,6 +1818,7 @@ local function refsText()
         .. " | Animasi: " .. (Anim.fn and "OK" or "TIDAK")
         .. " | Dropdown: " .. (UI.DropErr and ("ERROR " .. tostring(UI.DropErr))
             or (not Refs.inventoryOK(Refs.Inv) and "menunggu inventori") or (UI.DropOk and "OK" or "-"))
+        .. "\nKontrol gerak: " .. tostring(AutoInput and AutoInput.status and AutoInput.status() or "belum diperiksa")
         .. "\nStartup: " .. tostring(Shared and Shared.Status or "-")
         .. "\nDeteksi inventori r2: " .. tostring(Refs.InvSource or Refs.InvScanInfo or "-")
         .. (Refs.InvError and ("\nInventori: " .. Refs.InvError) or "")
@@ -2865,47 +2867,263 @@ local function setSpeed(pct)
     if Misc.Speed == 100 and Refs.World then Refs.World.speedScale = 1 end
 end
 
--- Tombol gerak game dibaca dari WorldMenu.isDown. Dibungkus supaya
--- tombol ▲/▼ Fly bisa dipakai, dan Clear / Farmer bisa "menekan" tombol sendiri.
+-- Kontrol gerak dicari terpisah dari UI tas; getter boleh diwariskan lewat __index.
 local OrigIsDown = nil
-local function isDownWrapper(saved, key, ...)
-    if AutoInput.active then
-        if key == "keyLeft" then return AutoInput.left end
-        if key == "keyRight" then return AutoInput.right end
-        if key == "keyJump" then return AutoInput.jump end
-        if key == "keyDown" then return AutoInput.down end
+function AutoInput.member(value, key)
+    local ok, result = pcall(function() return value[key] end)
+    if ok then return result end
+end
+function AutoInput.method(value)
+    if type(value) ~= "table" then return nil end
+    for _, key in ipairs({ "isDown", "isKeyDown" }) do
+        local fn = AutoInput.member(value, key)
+        if type(fn) == "function" then return fn, key end
     end
-    if Misc.Ghost then
-        if key == "keyDown" and Misc.DownHeld then return true end
-        if key == "keyJump" and Misc.UpHeld then return true end
+end
+function AutoInput.key(first, second)
+    local key = second ~= nil and second or first
+    if type(key) ~= "string" then key = AutoInput.member(key, "Name") end
+    if type(key) ~= "string" then return nil end
+    key = string.lower(key)
+    if key == "keyleft" or key == "left" or key == "a" then return "left" end
+    if key == "keyright" or key == "right" or key == "d" then return "right" end
+    if key == "keyjump" or key == "jump" or key == "space" or key == "up" or key == "w" then return "jump" end
+    if key == "keydown" or key == "down" or key == "s" then return "down" end
+end
+local function isDownWrapper(...)
+    local first, second = ...
+    local key = AutoInput.key(first, second)
+    if key then
+        AutoInput.Reads = (AutoInput.Reads or 0) + 1
+        AutoInput.LastRead = os.clock()
+        if AutoInput.active then return AutoInput[key] == true end
+        if Misc.Ghost then
+            if key == "down" and Misc.DownHeld then return true end
+            if key == "jump" and Misc.UpHeld then return true end
+        end
     end
-    return OrigIsDown(saved, key, ...)
+    if OrigIsDown then return OrigIsDown(...) end
+    return false
+end
+
+function AutoInput.findInput()
+    local best, bestFn, bestKey, bestSource, bestScore = nil, nil, nil, nil, -1
+    local function candidate(value, source, score)
+        local fn, key = AutoInput.method(value)
+        if not fn then return end
+        local ours = value == AutoInput.Menu and (fn == isDownWrapper or fn == AutoInput.Function)
+        if not ours and type(isexecutorclosure) == "function" and value ~= MenuModule and value ~= Refs.Menu then
+            local ok, owned = pcall(isexecutorclosure, fn)
+            if ok and owned then return end
+        end
+        if type(AutoInput.member(value, "openBackpack")) == "function" then score = score + 25 end
+        if type(AutoInput.member(value, "ui")) == "table" then score = score + 10 end
+        if ours and AutoInput.World ~= Refs.World then
+            score = score - 30
+        elseif ours and (AutoInput.Reads or 0) > 0 and os.clock() - (AutoInput.LastRead or 0) < 2 then
+            score = score + 35
+        end
+        if score > bestScore then
+            best, bestFn, bestKey, bestSource, bestScore = value, fn, key, source, score
+        end
+    end
+    local roots = {}
+    for _, entry in ipairs({ { AutoInput.World == Refs.World and Refs.Input or false, "kontrol sebelumnya", 15 }, { Refs.Menu, "menu game", 65 },
+        { Refs.StateOwner, "pemilik posisi", 60 }, { Refs.World, "world", 45 },
+        { MenuModOk and MenuModule or false, "modul WorldMenu", 10 } }) do
+        if type(entry[1]) == "table" then
+            candidate(entry[1], entry[2], entry[3])
+            roots[#roots + 1] = { value = entry[1], source = entry[2], score = entry[3], depth = 0 }
+        end
+    end
+    if type(getconnections) == "function" then
+        for _, entry in ipairs({
+            { RunService, { "RenderStepped", "Heartbeat", "PreRender", "PreSimulation", "Stepped" } },
+            { UserInputService, { "InputBegan", "InputEnded" } },
+        }) do
+            for _, name in ipairs(entry[2]) do
+                local signal = AutoInput.member(entry[1], name)
+                if signal then
+                    local ok, connections = pcall(getconnections, signal)
+                    if ok and type(connections) == "table" then
+                        for _, connection in pairs(connections) do
+                            local fn = AutoInput.member(connection, "Function")
+                            if type(fn) == "function" and #roots < 120 then
+                                roots[#roots + 1] = { value = fn, source = "callback " .. name, score = 85, depth = 0 }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local queue, seen, cursor = roots, {}, 1
+    local function push(value, source, score, depth)
+        if #queue >= 1200 or seen[value] or (type(value) ~= "table" and type(value) ~= "function") then return end
+        if value == G or value == _G or value == State or value == UI or value == AutoInput
+            or value == Refs or value == ItemDB or value == Session then return end
+        seen[value] = true
+        queue[#queue + 1] = { value = value, source = source, score = score, depth = depth }
+    end
+    if type(getgc) == "function" then
+        local ok, values = pcall(getgc, true)
+        if ok and type(values) == "table" then
+            local n = 0
+            for _, value in pairs(values) do
+                if type(value) == "table" then
+                    candidate(value, "getgc", value == MenuModule and 10 or 50)
+                elseif type(value) == "function" and type(getUpvalues) == "function" then
+                    local own = false
+                    if type(isexecutorclosure) == "function" then
+                        local checked, result = pcall(isexecutorclosure, value)
+                        own = checked and result
+                    end
+                    if not own then
+                        local got, ups = pcall(getUpvalues, value)
+                        if got and type(ups) == "table" then
+                            for _, child in pairs(ups) do
+                                if type(child) == "table" then
+                                    candidate(child, "getgc.upvalue", 50)
+                                    if AutoInput.method(child) or AutoInput.member(child, "input")
+                                        or AutoInput.member(child, "Input") or AutoInput.member(child, "controls")
+                                        or AutoInput.member(child, "Controller") then
+                                        push(child, "getgc.upvalue", 45, 0)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                n = n + 1
+                if n % 300 == 0 then task.wait() end
+            end
+        end
+    end
+    while cursor <= #queue do
+        local entry = queue[cursor]
+        cursor = cursor + 1
+        local value = entry.value
+        if type(value) == "table" then
+            candidate(value, entry.source, entry.score)
+            if entry.depth < 4 then
+                for _, key in ipairs({ "input", "Input", "controls", "Controls", "keys", "Keys",
+                    "menu", "Menu", "controller", "Controller", "worldMenu", "state", "State" }) do
+                    push(AutoInput.member(value, key), entry.source .. "." .. key, entry.score, entry.depth + 1)
+                end
+                local n = 0
+                for key, child in next, value do
+                    n = n + 1
+                    if n > 40 then break end
+                    if key ~= "fg" and key ~= "bg" and key ~= "slots" and key ~= "_G" and key ~= "_ENV" then
+                        push(child, entry.source, entry.score - 1, entry.depth + 1)
+                    end
+                end
+                local ok, mt = pcall(getmetatable, value)
+                if ok and type(mt) == "table" then push(rawget(mt, "__index"), entry.source, entry.score - 5, entry.depth + 1) end
+            end
+        elseif type(value) == "function" and entry.depth < 4 and type(getUpvalues) == "function" then
+            local score = entry.score
+            if type(getconsts) == "function" then
+                local ok, constants = pcall(getconsts, value)
+                if ok and type(constants) == "table" then
+                    local keys = 0
+                    for _, constant in pairs(constants) do
+                        if constant == "keyLeft" or constant == "keyRight" or constant == "keyJump" then keys = keys + 1 end
+                    end
+                    if keys >= 2 then score = score + 30 end
+                end
+            end
+            local ok, values = pcall(getUpvalues, value)
+            if ok and type(values) == "table" then
+                for _, child in pairs(values) do push(child, entry.source .. ".upvalue", score, entry.depth + 1) end
+            end
+        end
+        if cursor % 120 == 0 then task.wait() end
+    end
+    AutoInput.ScanInfo = "objek " .. tostring(cursor - 1) .. " | skor " .. tostring(bestScore)
+    return best, bestFn, bestKey, bestSource
 end
 
 function AutoInput.unbindMenu()
-    local menu = AutoInput.Menu
-    if menu and OrigIsDown and rawget(menu, "isDown") == isDownWrapper then
-        pcall(function() menu.isDown = OrigIsDown end)
+    local menu, key = AutoInput.Menu, AutoInput.Key
+    if AutoInput.Hooked and OrigIsDown then
+        local restored = false
+        if type(hookfunction) == "function" then restored = pcall(hookfunction, AutoInput.Function, OrigIsDown) end
+        if not restored and type(restorefunction) == "function" then restored = pcall(restorefunction, AutoInput.Function) end
+        if not restored then
+            AutoInput.active, Misc.UpHeld, Misc.DownHeld = false, false, false
+            AutoInput.Error = "Kontrol lama belum bisa dilepas; kontrol manual dipertahankan"
+            return false
+        end
+    elseif menu and key and rawget(menu, key) == isDownWrapper then
+        pcall(rawset, menu, key, AutoInput.OwnValue)
     end
-    AutoInput.Menu, OrigIsDown = nil, nil
-end
-
-function AutoInput.bindMenu()
-    -- Dahulukan tabel menu yang dipakai game, bukan salinan require executor.
-    local menu = Refs.Menu
-    if type(menu) ~= "table" or type(rawget(menu, "isDown")) ~= "function" then
-        menu = MenuModOk and MenuModule or nil
-    end
-    if menu == AutoInput.Menu and menu and rawget(menu, "isDown") == isDownWrapper then return true end
-    AutoInput.unbindMenu()
-    if type(menu) ~= "table" or type(rawget(menu, "isDown")) ~= "function" then return false end
-    OrigIsDown = rawget(menu, "isDown")
-    local ok = pcall(function() menu.isDown = isDownWrapper end)
-    if not ok then OrigIsDown = nil; return false end
-    AutoInput.Menu = menu
+    if Refs.Input == menu then Refs.Input, Refs.InputSource = nil, nil end
+    AutoInput.Menu, AutoInput.Key, AutoInput.Function, AutoInput.Hooked = nil, nil, nil, nil
+    AutoInput.OwnValue, AutoInput.World, AutoInput.Source, AutoInput.Error, OrigIsDown = nil, nil, nil, nil, nil
+    AutoInput.Reads = 0
     return true
 end
-AutoInput.bindMenu()
+
+function AutoInput.bindMenu(quick)
+    local menu, fn, key, source
+    if quick then
+        menu, source = Refs.Menu, "menu game"
+        fn, key = AutoInput.method(menu)
+        if not fn then
+            menu, source = MenuModOk and MenuModule or nil, "modul WorldMenu"
+            fn, key = AutoInput.method(menu)
+        end
+    else
+        menu, fn, key, source = AutoInput.findInput()
+    end
+    if menu == AutoInput.Menu and menu and key == AutoInput.Key
+        and (fn == isDownWrapper or (AutoInput.Hooked and fn == AutoInput.Function)) then
+        AutoInput.World = Refs.World
+        Refs.Input, Refs.InputSource = menu, AutoInput.Source
+        return true
+    end
+    if AutoInput.unbindMenu() == false then return false end
+    if not menu then
+        AutoInput.Source, AutoInput.Error = nil, "Pembaca tombol gerak belum ditemukan (" .. tostring(AutoInput.ScanInfo) .. ")"
+        return false
+    end
+    OrigIsDown = fn
+    local own = rawget(menu, key)
+    local ok = pcall(rawset, menu, key, isDownWrapper)
+    if not ok or AutoInput.member(menu, key) ~= isDownWrapper then
+        if type(hookfunction) == "function" then
+            local replacement = isDownWrapper
+            if type(newcclosure) == "function" then
+                local made, closure = pcall(newcclosure, isDownWrapper)
+                if made and type(closure) == "function" then replacement = closure end
+            end
+            local hooked, original = pcall(hookfunction, fn, replacement)
+            if hooked and type(original) == "function" then
+                OrigIsDown, AutoInput.Hooked = original, true
+            else
+                OrigIsDown = nil
+            end
+        else
+            OrigIsDown = nil
+        end
+        if not OrigIsDown then
+            AutoInput.Error = "Kontrol ditemukan tetapi tidak bisa dipasang: " .. tostring(source) .. "." .. key
+            return false
+        end
+    end
+    AutoInput.Menu, AutoInput.Key, AutoInput.OwnValue = menu, key, own
+    AutoInput.Function, AutoInput.Source, AutoInput.Error = fn, source .. "." .. key, nil
+    AutoInput.World = Refs.World
+    AutoInput.Reads = 0
+    Refs.Input, Refs.InputSource = menu, AutoInput.Source
+    return true
+end
+function AutoInput.status()
+    return AutoInput.Error or ((AutoInput.Source or "belum terhubung") .. " | bacaan " .. tostring(AutoInput.Reads or 0))
+end
+-- Pemindaian penuh dijalankan oleh reconnect setelah jendela utama terbentuk.
+AutoInput.bindMenu(true)
 
 -- Pasang walkspeed & fly tiap frame (game bisa menimpanya)
 table.insert(Connections, RunService.Heartbeat:Connect(function()
@@ -4767,7 +4985,8 @@ end
 local function checkAutoStart()
     if not Refs.World then return "Data world belum ketemu. Tekan 'Hubungkan ke game'" end
     if not Refs.Punch then return "Fungsi pukul game belum ketemu. Tekan 'Hubungkan ke game'" end
-    if not OrigIsDown then return "Kontrol gerak game (WorldMenu.isDown) tidak ketemu" end
+    if not OrigIsDown then AutoInput.bindMenu() end
+    if not OrigIsDown then return AutoInput.Error or "Kontrol gerak game belum terhubung" end
     if not playerState() then return "Kamu belum masuk world" end
     return nil
 end
@@ -5339,6 +5558,7 @@ local function updateFarmerStatus()
         .. "\nPanen   : " .. Farmer.Harvested .. "  | tanam: " .. Farmer.Planted .. "  | collect: " .. State.Collected
         .. "\nSeed    : " .. (seed and (itemName(seed) .. " x" .. invCount(seed)) or "-")
         .. "\nPohon   : " .. (Refs.Trees and "terbaca" or "TIDAK terbaca (harvest mati)")
+        .. "\nKontrol : " .. AutoInput.status()
         .. "\nPijakan : " .. blockText(Farmer.UseBlock, Farmer.ScaffoldId)
         .. "\nDrop    : " .. ((Pabrik.pointSet and Pabrik.pointSet()) and ("otomatis saat >= " .. Farmer.DropAt
             .. " | di-drop " .. Farmer.Dropped) or "titik drop belum diatur")
@@ -5710,7 +5930,8 @@ local function spliceRoamLoop(runId)
 end
 
 local function startSpliceRoam()
-    if not OrigIsDown then return "Kontrol gerak game (WorldMenu.isDown) tidak ketemu" end
+    if not OrigIsDown then AutoInput.bindMenu() end
+    if not OrigIsDown then return AutoInput.Error or "Kontrol gerak game belum terhubung" end
     table.clear(Splice.Row)
     if not playerState() then return "Kamu belum masuk world" end
     if not Refs.Trees then findTreeRefs() end
@@ -6378,8 +6599,8 @@ function Pabrik.start()
     local block = blockOfSeed(Pabrik.SeedId)
     if not Refs.World then
         err = "Data world belum ketemu. Tekan 'Hubungkan ke game'"
-    elseif not OrigIsDown then
-        err = "Kontrol gerak game (WorldMenu.isDown) tidak ketemu"
+    elseif not OrigIsDown and not AutoInput.bindMenu() then
+        err = AutoInput.Error or "Kontrol gerak game belum terhubung"
     elseif not playerState() then
         err = "Kamu belum masuk world"
     elseif not Pabrik.SeedId then
@@ -7073,8 +7294,8 @@ function Vend.start()
     local err
     if not Refs.World then
         err = "Data world belum ketemu. Tekan 'Hubungkan ke game'"
-    elseif not OrigIsDown then
-        err = "Kontrol gerak game (WorldMenu.isDown) tidak ketemu"
+    elseif not OrigIsDown and not AutoInput.bindMenu() then
+        err = AutoInput.Error or "Kontrol gerak game belum terhubung"
     elseif not playerState() then
         err = "Kamu belum masuk world"
     elseif type(rawget(Refs.World, "vendCall")) ~= "function" then
@@ -8026,8 +8247,8 @@ function Build.start()
     local it = Build.BlockId and ItemDB[Build.BlockId]
     if not Refs.World then
         err = "Data world belum ketemu. Tekan 'Hubungkan ke game'"
-    elseif not OrigIsDown then
-        err = "Kontrol gerak game (WorldMenu.isDown) tidak ketemu"
+    elseif not OrigIsDown and not AutoInput.bindMenu() then
+        err = AutoInput.Error or "Kontrol gerak game belum terhubung"
     elseif not playerState() then
         err = "Kamu belum masuk world"
     elseif not (it and it.solid) then
@@ -8985,7 +9206,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme",
     Icon = "sprout",
-    Author = "v5.9.5 | Startup r10",
+    Author = "v5.9.6 | Input r11",
     Folder = "KzoyzOpus",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",

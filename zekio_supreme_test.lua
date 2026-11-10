@@ -7,9 +7,92 @@ end
 local Session = {}
 G.__ZekioSupremeTest = Session
 local function alive()
-    return G.__ZekioSupremeTest == Session
+    return G.__ZekioSupremeTest == Session and not Session.Failed
 end
 
+-- Panel ini dibuat sebelum modul game / WindUI. Kegagalan startup tetap
+-- terlihat meskipun jendela utama belum berhasil dibuat.
+do (function()
+    local gui, label
+    local stage, stageAt = "Memulai TEST r25", os.clock()
+    function Session.GuiParent(fallback)
+        if not fallback then
+            local p = game:GetService("Players").LocalPlayer
+            fallback = p and (p:FindFirstChildOfClass("PlayerGui") or p:FindFirstChild("PlayerGui"))
+        end
+        local root = fallback
+        if type(gethui) == "function" then
+            local ok, value = pcall(gethui)
+            if ok and value then root = value end
+        end
+        if root then
+            local probe = Instance.new("ScreenGui")
+            local ok = pcall(function() probe.Parent = root end)
+            pcall(function() probe:Destroy() end)
+            if ok then return root end
+        end
+        assert(fallback, "PlayerGui belum tersedia; tunggu game selesai masuk")
+        return fallback
+    end
+    local function draw(message)
+        if not label then
+            pcall(function()
+                gui = Instance.new("ScreenGui")
+                gui.Name, gui.ResetOnSpawn, gui.IgnoreGuiInset = "ZekioTestStartup", false, true
+                gui.DisplayOrder = 2000000
+                gui.Parent = Session.GuiParent()
+                local frame = Instance.new("Frame")
+                frame.AnchorPoint, frame.Position = Vector2.new(0.5, 1), UDim2.new(0.5, 0, 0.97, 0)
+                frame.Size, frame.BackgroundColor3 = UDim2.new(0.9, 0, 0, 154), Color3.fromRGB(20, 22, 29)
+                frame.Parent = gui
+                label = Instance.new("TextLabel")
+                label.Position, label.Size = UDim2.new(0, 10, 0, 8), UDim2.new(1, -42, 1, -16)
+                label.BackgroundTransparency, label.Font, label.TextSize = 1, Enum.Font.Code, 13
+                label.TextColor3, label.TextWrapped = Color3.fromRGB(245, 245, 245), true
+                label.TextXAlignment, label.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
+                label.Parent = frame
+                local close = Instance.new("TextButton")
+                close.Size, close.Position, close.Text = UDim2.new(0, 26, 0, 26), UDim2.new(1, -30, 0, 4), "X"
+                close.Parent = frame
+                close.MouseButton1Click:Connect(function() Session.CloseBoot() end)
+            end)
+        end
+        if label then pcall(function() label.Text = "ZEKIO SUPREME TEST r25\n" .. tostring(message):sub(1, 1100) end) end
+    end
+    function Session.Report(message)
+        stage, stageAt = tostring(message), os.clock()
+        warn("[Zekio TEST startup] " .. stage)
+        draw(stage)
+    end
+    function Session.CloseBoot()
+        if gui then pcall(function() gui:Destroy() end) end
+        gui, label = nil, nil
+    end
+    function Session.FailStartup(message)
+        Session.Failed = true
+        Session.ResetPartial()
+        Session.Report("GAGAL: " .. stage .. "\n" .. tostring(message) .. "\nKirim screenshot kotak ini.")
+    end
+    function Session.ResetPartial()
+        if Session.UnbindInput then pcall(Session.UnbindInput) end
+        for _, c in ipairs(Session.StartupConnections or {}) do pcall(function() c:Disconnect() end) end
+        for _, g in ipairs(Session.StartupGuis or {}) do pcall(function() g:Destroy() end) end
+        if Session.StartupWindow then pcall(function() Session.StartupWindow:Destroy() end) end
+    end
+    Session.Cleanup = function() Session.ResetPartial(); Session.CloseBoot() end
+    Session.Report(stage)
+    task.spawn(function()
+        while alive() and not Session.Ready and not Session.Failed do
+            task.wait(0.5)
+            local seconds = math.floor(os.clock() - stageAt)
+            if not Session.Ready and not Session.Failed and seconds >= 10 then
+                draw("Masih memuat (" .. seconds .. " detik): " .. stage .. "\nKirim screenshot jika tetap berhenti di sini.")
+            end
+        end
+    end)
+end)() end
+
+local startupOk, startupError = xpcall(function()
 do
     local getId = getthreadidentity or get_thread_identity or getidentity or (syn and syn.get_thread_identity)
     if type(getId) == "function" then pcall(function() Session.Ident = getId() end) end
@@ -32,7 +115,10 @@ local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+Session.Report("Menunggu PlayerGui")
+assert(LocalPlayer, "Masuk ke game Roblox terlebih dahulu")
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 15)
+assert(PlayerGui, "PlayerGui belum tersedia setelah 15 detik; masuk world lalu execute ulang")
 
 -- Cari dependensi tanpa menunggu satu lokasi folder selamanya.
 local Shared = (function()
@@ -42,6 +128,7 @@ local Shared = (function()
     local seen, containers, remotes, gameGui = {}, {}, nil, nil
 
     local function note(text)
+        Session.Report("Data game: " .. tostring(text))
         local f = G.__ZekioTestLaunchReport
         if type(f) == "function" then pcall(f, "Startup r10: " .. text) end
     end
@@ -275,9 +362,52 @@ local MenuModOk, MenuModule = Shared.MenuOK, Shared.Menu
 local RolesOk, RolesModule = Shared.RolesOK, Shared.Roles
 local SfxOk, SfxModule = Shared.SfxOK, Shared.Sfx
 
-local WindUI = loadstring(game:HttpGet(
-    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
-))()
+local WindUI = (function()
+    local urls = {
+        "https://github.com/Footagesus/WindUI/releases/download/1.6.66/main.lua",
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
+    }
+    local failures = {}
+    for i, url in ipairs(urls) do
+        Session.Report(("Mengunduh UI (%d/%d)"):format(i, #urls))
+        local job = { done = false }
+        local thread = task.spawn(function()
+            job.ok, job.body = pcall(game.HttpGet, game, url)
+            job.done = true
+        end)
+        local at = os.clock()
+        while not job.done and alive() and os.clock() - at < 12 do task.wait(0.05) end
+        if not alive() then error("Sesi tes sudah diganti / ditutup", 0) end
+        if not job.done then
+            if type(task.cancel) == "function" then pcall(task.cancel, thread) end
+            failures[#failures + 1] = "Jalur " .. i .. ": HTTP melewati 12 detik"
+        elseif not job.ok or type(job.body) ~= "string" or #job.body < 1000 then
+            failures[#failures + 1] = "Jalur " .. i .. ": " .. tostring(job.body):sub(1, 150)
+        else
+            Session.Report("Memuat pustaka UI dari jalur " .. i)
+            local chunk, compileError = loadstring(job.body, "=ZekioWindUI")
+            if chunk then
+                -- Fallback parent hanya untuk pustaka UI ini; fungsi gethui
+                -- global milik executor tidak diubah.
+                if type(getfenv) == "function" and type(setfenv) == "function" then
+                    local okEnv, environment = pcall(getfenv, chunk)
+                    if okEnv and type(environment) == "table" then
+                        local uiEnvironment = setmetatable({
+                            gethui = function() return Session.GuiParent(PlayerGui) end,
+                        }, { __index = environment, __newindex = environment })
+                        pcall(setfenv, chunk, uiEnvironment)
+                    end
+                end
+                local ok, library = pcall(chunk)
+                if ok and type(library) == "table" and type(library.CreateWindow) == "function" then return library end
+                failures[#failures + 1] = "Jalur " .. i .. ": " .. tostring(library):sub(1, 180)
+            else
+                failures[#failures + 1] = "Jalur " .. i .. ": " .. tostring(compileError):sub(1, 180)
+            end
+        end
+    end
+    error("WindUI gagal dimuat. " .. table.concat(failures, " | "), 0)
+end)()
 
 ---------------------------------------------------------------------
 -- PENGATURAN & DATA
@@ -576,6 +706,7 @@ function UI.runJobs()
     end
 end
 local Connections = {}
+Session.StartupConnections = Connections
 local HitCount = {}   -- hitung pukulan (cadangan)
 local PlacedAt = {}   -- kapan tile di-place
 
@@ -3131,6 +3262,7 @@ function AutoInput.status()
     return AutoInput.Error or ((AutoInput.Source or "belum terhubung") .. " | bacaan " .. tostring(AutoInput.Reads or 0))
 end
 -- Pemindaian penuh dijalankan oleh reconnect setelah jendela utama terbentuk.
+Session.UnbindInput = AutoInput.unbindMenu
 AutoInput.bindMenu(true)
 
 -- Pasang walkspeed & fly tiap frame (game bisa menimpanya)
@@ -9353,10 +9485,13 @@ end))
 ---------------------------------------------------------------------
 -- GUI TAMBAHAN: Grid Tile 5x5 + tombol Fly ▲/▼
 ---------------------------------------------------------------------
-local guiParent = (gethui and gethui()) or game:GetService("CoreGui")
+Session.Report("Menyiapkan panel dan kontrol")
+local guiParent = Session.GuiParent(PlayerGui)
 
 local function newScreenGui(name)
     local sg = Instance.new("ScreenGui")
+    Session.StartupGuis = Session.StartupGuis or {}
+    table.insert(Session.StartupGuis, sg)
     sg.Name = name
     sg.ResetOnSpawn = false
     sg.IgnoreGuiInset = true
@@ -9635,43 +9770,12 @@ flyButton("▼", 40, function(v) Misc.DownHeld = v end)
 ---------------------------------------------------------------------
 -- UI WINDUI
 ---------------------------------------------------------------------
--- Pilih bahasa saat execute (sebelum menu dibuat, karena teks menu dipasang sekali)
-do (function()
-    if not I18N.Ask and Config.saved("Bahasa", "Saved") then return end
-    local chosen, late = false, false
-    local function pick(lang)
-        if late then
-            I18N.Saved = lang
-            Config.save(true)
-            notify("Bahasa / Language", "Execute ulang untuk ganti bahasa / Re-execute to apply", 5)
-            return
-        end
-        I18N.Lang, I18N.Saved, chosen = lang, lang, true
-    end
-    local ok = pcall(function()
-        WindUI:Popup({
-            Title = "Zekio supreme TEST",
-            Icon = "languages",
-            Content = "Pilih bahasa menu\nChoose menu language",
-            Buttons = {
-                { Title = "Indonesia", Variant = I18N.Lang == "id" and "Primary" or "Secondary",
-                    Callback = function() pick("id") end },
-                { Title = "English", Variant = I18N.Lang == "en" and "Primary" or "Secondary",
-                    Callback = function() pick("en") end },
-            },
-        })
-    end)
-    if not ok then return end
-    local t0 = os.clock()
-    while not chosen and os.clock() - t0 < 30 and alive() do task.wait(0.1) end
-    late = not chosen -- tidak dipilih dalam 30 detik: pakai bahasa terakhir
-    if chosen then Config.save(true) end
-end)() end
-
+-- Bahasa tersimpan dipakai langsung. Pilihan bahasa tidak menahan pembuatan menu.
+Session.Report("Membuat menu TEST r25")
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.19 | TEST r24",
+    Author = "v5.9.20 | TEST r25",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -9679,6 +9783,11 @@ local Window = I18N.wrap(WindUI:CreateWindow({
     SideBarWidth = 150,
     ToggleKey = Enum.KeyCode.Insert,  -- PC: tekan Insert untuk buka/tutup menu
 }))
+assert(Window, "WindUI tidak mengembalikan jendela menu")
+Session.MenuCreated = true
+Session.StartupWindow = Window
+pcall(function() if type(Window.Open) == "function" then Window:Open() end end)
+Session.Report("Menu dibuat; menyiapkan tab")
 -- Tombol minimize muncul di mobile DAN PC (OnlyMobile=false), bisa digeser.
 -- Cadangan PC: kalau tombol susah dicari, tekan Insert.
 pcall(function()
@@ -13093,7 +13202,7 @@ end)
 safe(function()
     Box.ConnLang:Toggle({
         Title = "Tanya bahasa saat execute",
-        Desc = "Munculkan pilihan bahasa tiap execute",
+        Desc = "Pilihan muncul setelah menu terbuka; pergantian bahasa berlaku saat execute ulang",
         Value = I18N.Ask,
         Callback = function(on) I18N.Ask = on end,
     })
@@ -13333,6 +13442,7 @@ end)
 -- CLEANUP (otomatis saat script dijalankan ulang)
 ---------------------------------------------------------------------
 Session.Cleanup = function()
+    Session.CloseBoot()
     if Session.DoorTravel then Session.DoorTravel.cancel() end
     State.Running = false
     Clear.Running = false
@@ -13367,3 +13477,32 @@ Session.Cleanup = function()
     pcall(function() FlyPad:Destroy() end)
     pcall(function() Window:Destroy() end)
 end
+
+Session.Ready = true
+Session.CloseBoot()
+if I18N.Ask then
+    task.defer(function()
+        if not alive() then return end
+        pcall(function()
+            local function pick(lang)
+                if lang == I18N.Saved then return end
+                I18N.Saved = lang
+                Config.save(true)
+                notify("Bahasa / Language", "Execute ulang untuk ganti bahasa / Re-execute to apply", 5)
+            end
+            WindUI:Popup({
+                Title = "Bahasa / Language",
+                Content = "Menu sudah terbuka. Pilih bahasa untuk execute berikutnya.",
+                Buttons = {
+                    { Title = "Indonesia", Callback = function() pick("id") end },
+                    { Title = "English", Callback = function() pick("en") end },
+                },
+            })
+        end)
+    end)
+end
+end, function(message)
+    if debug and type(debug.traceback) == "function" then return debug.traceback(tostring(message), 2) end
+    return tostring(message)
+end)
+if not startupOk then Session.FailStartup(startupError) end

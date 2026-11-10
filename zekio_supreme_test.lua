@@ -5433,7 +5433,9 @@ function Move.farmerAreaTargets(s, kind, cfg)
                 if harvesting and cfg.harvest and id ~= 0 and (not cfg.only or id == cfg.only)
                     and (not cfg.area or cfg.area(x, y)) then
                     local ra = treeReadyAt(x, y, id)
-                    if ra and st >= ra and Move.los(floor(cx), floor(cy), x, y) then
+                    -- Fokus panen mencakup atas/bawah dan kiri/kanan. Jangan
+                    -- buang pohon terjangkau hanya karena drop berada di balik lantai.
+                    if ra and st >= ra and (cfg.focusHarvest or Move.los(floor(cx), floor(cy), x, y)) then
                         if canWorkAt(x, y) then
                             list[#list + 1] = { x = x, y = y, idx = idx, id = id, readyAt = ra }
                         else
@@ -5807,7 +5809,7 @@ function Move.farmerGroupRoute(s, cfg, targets, nearby, useBlock)
                                 or (useBlock and placeOk(nx, ny + 1))) }
                         cells[idx] = c
                     end
-                    if c.open and Move.los(nx, ny, t.x, t.y)
+                    if c.open and (cfg.focusHarvest or Move.los(nx, ny, t.x, t.y))
                         and stateReaches({ x = nx + 0.5, y = ny + 0.95 }, t.x, t.y, R) then
                         c.n = c.n + 1
                         if anchor == t.idx then c.anchor = true end
@@ -5862,7 +5864,7 @@ local function updateFarmerStatus()
     local txt = "Status  : " .. (Farmer.Running and "JALAN" or "BERHENTI")
         .. "\nPanen   : " .. Farmer.Harvested .. "  | tanam: " .. Farmer.Planted .. "  | collect: " .. State.Collected
         .. "\nSeed    : " .. (seed and (itemName(seed) .. " x" .. invCount(seed)) or "-")
-        .. "\nMode    : " .. (Farmer.HarvestOnly and "harvest area, utamakan posisi 2+ pohon"
+        .. "\nMode    : " .. (Farmer.HarvestOnly and "harvest area vertikal + horizontal"
             or "aksi area sesuai Auto Harvest / Auto Plant")
         .. "\nIsi seed: " .. ((Farmer.Plant and not Farmer.HarvestOnly)
             and (Farmer.RefillStatus or "otomatis saat seed pilihan habis") or "tidak aktif saat harvest saja")
@@ -6040,7 +6042,9 @@ local function fieldStep()
     if FC.batch then
         R = (targets[1].kind == "harvest" and punchReach() or buildReach()) - 0.35
     end
-    targets.los = targets[1].kind == "harvest" -- panen: berdiri di baris pohon (drop terambil)
+    -- Fokus panen memakai jangkauan asli ke segala arah, termasuk beda baris.
+    -- Mode tanam tetap mendekati baris pohon untuk mengambil hasil panennya.
+    targets.los = targets[1].kind == "harvest" and not FC.focusHarvest
     if targets[1].kind == "plant" then targets.cancel = FC.yieldHarvest end
     travelGroup(sx, sy, targets, R, useBlock, FC.skip, FarmerFail)
     return "move"
@@ -6617,8 +6621,9 @@ end
 ---------------------------------------------------------------------
 -- Fase (berputar terus):
 --   PANEN : panen semua pohon siap di lahan (berhenti kalau block / seed hampir 200)
---   TANAM : tanam seed di semua tile lahan yang kosong
+--   AMBIL : pungut block yang sesuai seed pilihan dari hasil panen di world ini
 --   BREAK : jalan ke posisi break, Auto Farm di tile pabrik; jeda saat pohon siap.
+--   TANAM : setelah break, tanam seed di semua tile lahan yang kosong
 --   Pohon siap didahulukan selama inventori masih punya ruang hasil panen.
 --   TUNGGU: tunggu pohon siap, lalu kembali ke PANEN
 --   Kapan saja seed >= batas drop -> pergi drop (seed - sisakan), lalu pulang.
@@ -6645,7 +6650,7 @@ local function pabrikCfg(o, harvest, plant)
         plantSet = plantSet,
         exclude = o.exclude,
         row = Pabrik.Row,
-        collect = true,
+        collect = not harvest, -- panen dahulu; perjalanan ambil block punya fase sendiri
         status = function(t) Pabrik.Status = t end,
         onHarvest = function() Pabrik.Harvested += 1 end,
         onPlant = function() Pabrik.Planted += 1 end,
@@ -6666,6 +6671,95 @@ function Pabrik.wantHarvest(o)
         o.readyWorld, o.readyWhole, o.readyCheckAt = w, o.whole, now + 0.25
     end
     return (o.readyCount or 0) > 0
+end
+
+-- Satu pengambilan block per langkah. Jumlah yang benar-benar masuk tas
+-- menjadi acuan, bukan hilangnya drop atau keberhasilan berjalan saja.
+function Pabrik.takeBlocks(o)
+    local w = Refs.World
+    local function live() return o.live() and alive() and Refs.World == w and not Pabrik.Traveling end
+    if not w or not live() then return "cancelled" end
+    if Pabrik.wantHarvest(o) then return "harvest" end
+    if o.takeWorld ~= w or o.takeBlock ~= o.block then
+        o.takeWorld, o.takeBlock, o.takeSkip = w, o.block, {}
+        o.takePending, o.takeUnreadable = false, false
+    end
+    o.takePending, o.takeUnreadable = false, false
+    if invCount(o.block) >= CAP then return "full" end
+    if Refs.Inv then
+        local okr, room = pcall(function() return Refs.Inv:room(o.block) end)
+        if okr and type(room) == "number" and room <= 0 then return "full" end
+    end
+    if not Drops.list then pcall(findDropRefs) end -- tanpa pemindaian getgc
+    if not Drops.list then
+        o.takeUnreadable = true
+        o.takeStatus = "Daftar drop block belum terbaca; tekan Hubungkan ke game"
+        Pabrik.Status = o.takeStatus
+        return "none"
+    end
+    local s, now = playerState(), os.clock()
+    if not s or s.dead then return "cancelled" end
+    local best, distance
+    local zone = Pabrik.Zone
+    if zone and zone.world ~= rawget(w, "name") then zone = nil end
+    for _, d in ipairs(Drops.snapshot()) do
+        if d.id == o.block and d.n > 0 and not d.display
+            and d.x >= 0 and d.y >= 0 and d.x < w.w and d.y < w.h
+            and not solidAt(floor(d.x), floor(d.y))
+            and (o.whole or inLandRect(floor(d.x), floor(d.y)))
+            and not (zone and abs(d.x - zone.x) <= 2.5 and abs(d.y - zone.y) <= 2.5) then
+            o.takePending = true
+            if canTry(d, now) and (not o.takeSkip[d.uid] or now >= o.takeSkip[d.uid]) then
+                local dx, dy = d.x - s.x, d.y - (s.y - 0.475)
+                local dd = dx * dx + 4 * dy * dy
+                if not distance or dd < distance then best, distance = d, dd end
+            end
+        end
+    end
+    if not best then
+        o.takeStatus = o.takePending and "Block belum masuk tas; coba pengambilan lagi sebentar" or nil
+        return "none"
+    end
+    local before = invCount(o.block)
+    local function cancel()
+        return not live() or invCount(o.block) > before or Pabrik.wantHarvest(o)
+    end
+    local function takeNearby()
+        if cancel() or State.CollectMode ~= "Remote" or Drops.key(Drops.list, best) == nil
+            or not canTry(best, os.clock()) then return end
+        local cur, R = playerState(), (State.CollectRadius or 3) + 0.2
+        if cur and abs(best.x - cur.x) <= R and abs(best.y - (cur.y - 0.475)) <= R then
+            pcall(takeDrop, best)
+        end
+    end
+    o.takeStatus = ("Ambil block %s di (%d,%d)"):format(itemName(o.block), floor(best.x), floor(best.y))
+    Pabrik.Status = o.takeStatus
+    takeNearby()
+    if live() and invCount(o.block) <= before and not Pabrik.wantHarvest(o) then
+        pcall(Move.visitDrop, best, cancel)
+    end
+    releaseInput()
+    if not live() then return "cancelled" end
+    if Pabrik.wantHarvest(o) then return "harvest" end
+    takeNearby()
+    local untilAt = os.clock() + 0.6
+    while live() and not Pabrik.wantHarvest(o) and invCount(o.block) <= before
+        and best.taking and os.clock() < untilAt do
+        task.wait(0.05)
+    end
+    if not live() then return "cancelled" end
+    if Pabrik.wantHarvest(o) then return "harvest" end
+    local got = invCount(o.block) - before
+    if got > 0 then
+        Pabrik.BlocksTaken = (Pabrik.BlocksTaken or 0) + got
+        o.takeStatus = ("Block masuk tas +%d; siapkan sesi break"):format(got)
+        Pabrik.Status = o.takeStatus
+        return "picked", got
+    end
+    o.takeSkip[best.uid] = os.clock() + 3
+    o.takeStatus = "Block belum masuk tas; coba drop lain sebelum lanjut break"
+    Pabrik.Status = o.takeStatus
+    return "waiting"
 end
 
 -- Break block di posisi pabrik (pakai Auto Farm dengan tile & block pabrik)
@@ -6912,15 +7006,16 @@ task.spawn(function()
     end
 end)
 
-local PHASE_NAME = { panen = "PANEN", tanam = "TANAM", ["break"] = "BREAK", tunggu = "TUNGGU" }
+local PHASE_NAME = { panen = "PANEN", ambil = "AMBIL BLOCK", tanam = "TANAM", ["break"] = "BREAK", tunggu = "TUNGGU" }
 
 local function breakReady()
     return Pabrik.BreakX >= 0 and next(Pabrik.Tiles) ~= nil and os.clock() >= (Pabrik.BreakFailUntil or 0)
 end
 
 -- 1 langkah pabrik. o = { seed, block, drop, breakMode, whole, exclude, live, phase }
--- Hasil: "drop" | "work" | "move" | "wait" | "break" | "next" | "idle" (+ detik ke pohon siap)
+-- Hasil: "drop" | "work" | "take" | "move" | "wait" | "break" | "next" | "idle" (+ detik ke pohon siap)
 local function pabrikStep(o)
+    if not o.live() or not alive() then return "wait" end
     local seeds, blocks = invCount(o.seed), invCount(o.block)
     o.phase = o.phase or "panen"
     Pabrik.Phase = PHASE_NAME[o.phase]
@@ -6940,7 +7035,7 @@ local function pabrikStep(o)
     if o.phase == "panen" then
         -- 1x panen bisa kena beberapa pohon, jadi sisakan ruang ~20 item
         if blocks >= CAP - 20 or seeds >= CAP - 20 then
-            o.phase = "tanam"
+            o.phase = "ambil"
             return "next"
         end
         FC = pabrikCfg(o, true, false)
@@ -6953,18 +7048,20 @@ local function pabrikStep(o)
                 Reach = nil
             end
             o.idleAt = os.clock()
-            o.phase = "tanam"
+            o.phase = "ambil"
             return "next"
         end
         return r
     end
 
-    if o.phase == "tanam" then
-        if seeds > 0 then
-            FC = pabrikCfg(o, false, true)
-            local r = fieldStep()
-            if r == "harvest" then o.phase = "panen"; return "next" end
-            if r ~= "idle" then return r end
+    if o.phase == "ambil" then
+        local r = Pabrik.takeBlocks(o)
+        if r == "harvest" then o.phase = "panen"; return "next" end
+        if r == "cancelled" then return "wait" end
+        if r == "picked" then return "take" end
+        if r == "waiting" then
+            waitAuto(200)
+            return "wait"
         end
         o.phase = "break"
         return "next"
@@ -6973,7 +7070,7 @@ local function pabrikStep(o)
     if o.phase == "break" then
         local want
         if o.breakMode == "always" then
-            want = blocks > 0
+            want = blocks > 0 and seeds < CAP
         else -- mode produksi: break hanya untuk dapat seed awal
             local _, nxt = readyTreeCount(o.whole)
             want = blocks > 0 and seeds < BOOT_SEEDS and nxt == nil
@@ -6985,23 +7082,38 @@ local function pabrikStep(o)
                     o.phase = "panen"
                     return "next"
                 end
-                o.phase = (o.breakMode == "always" and invCount(o.block) > 0) and "break" or "tanam"
+                o.phase = "tanam"
                 return "break"
             end
         end
+        o.phase = "tanam"
+        return "next"
+    end
+
+    if o.phase == "tanam" then
+        if seeds > 0 then
+            FC = pabrikCfg(o, false, true)
+            local r = fieldStep()
+            if r == "harvest" then o.phase = "panen"; return "next" end
+            if r ~= "idle" then return r end
+        end
+        o.plantAt = os.clock()
+        o.takeCheckAt = os.clock() + 1
         o.phase = "tunggu"
         return "next"
     end
 
     -- tunggu
     local n, nxt = readyTreeCount(o.whole)
-    if o.breakMode == "always" and blocks > 0 and breakReady() then
-        o.phase = "break"
+    if o.breakMode == "always" and blocks > 0 and seeds < CAP and breakReady() then
+        o.phase = "ambil"
         return "next"
     end
-    if seeds > 0 and os.clock() - (o.plantAt or 0) > 10 then
-        o.plantAt = os.clock() -- sesekali cek tile kosong (misal pohon dipanen orang lain)
-        o.phase = "tanam"
+    if (seeds > 0 and os.clock() - (o.plantAt or 0) > 10)
+        or (blocks < CAP and os.clock() >= (o.takeCheckAt or 0)) then
+        -- Drop block yang masih di world diperiksa sebelum break / tanam lagi.
+        o.takeCheckAt = os.clock() + 1
+        o.phase = "ambil"
         return "next"
     end
     return "idle", nxt, n
@@ -7040,7 +7152,8 @@ local function pabrikLoop(runId)
         if r ~= "idle" then o.stuckAt = nil end
         if r == "idle" then
             local seeds, blocks = invCount(o.seed), invCount(o.block)
-            if not nextReady and (nReady or 0) == 0 and seeds <= 0 and blocks <= 0 then
+            if not nextReady and (nReady or 0) == 0 and seeds <= 0 and blocks <= 0
+                and not o.takePending and not o.takeUnreadable then
                 if Pabrik.stop then Pabrik.stop("Seed & block habis, tidak ada pohon tumbuh") end
                 break
             end
@@ -7058,6 +7171,8 @@ local function pabrikLoop(runId)
                 Pabrik.Status = ("Seed hampir penuh (%d): atur titik drop & nyalakan Auto drop seed"):format(seeds)
             elseif (nReady or 0) > 0 then
                 Pabrik.Status = nReady .. " pohon siap belum terjangkau, dicoba lagi"
+            elseif seeds <= 0 and blocks <= 0 and (o.takePending or o.takeUnreadable) then
+                Pabrik.Status = o.takeStatus or "Menunggu block hasil panen yang bisa diambil"
             elseif nextReady then
                 Pabrik.Status = "Menunggu pohon siap ±" .. waitText(nextReady)
             elseif blocks > 0 and (Pabrik.BreakX < 0 or next(Pabrik.Tiles) == nil) then
@@ -7122,7 +7237,7 @@ function Pabrik.start()
     Pabrik.DropOffUntil, Pabrik.BreakFailUntil = 0, 0
     Pabrik.Running = true
     Pabrik.RunId = (Pabrik.RunId or 0) + 1
-    Pabrik.Status = "Mulai..."
+    Pabrik.Status = "Mulai: panen ready -> ambil block -> break -> tanam"
     autoBegin()
     if UI.PabrikToggle then pcall(function() UI.PabrikToggle:Set(true) end) end
     local id = Pabrik.RunId
@@ -9377,7 +9492,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.15 | TEST r20",
+    Author = "v5.9.17 | TEST r22",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -9662,7 +9777,7 @@ end)
 safe(function()
     UI.FarmerHarvestToggle = Box.FarmerCtl:Toggle({
         Title = "Auto Harvest",
-        Desc = "Cari posisi untuk 2+ pohon ready, panen area tanpa putaran drop; Auto Plant mati",
+        Desc = "Panen pohon ready atas, bawah, kiri dan kanan dalam jangkauan pukul; Auto Plant mati",
         Value = Farmer.Harvest,
         Callback = Farmer.setHarvest,
     })
@@ -12034,7 +12149,7 @@ do (function()
     safe(function()
         UI.PabrikToggle = pCtl:Toggle({
             Title = "Jalankan Pabrik",
-            Desc = "Pohon ready diprioritaskan; lanjut tanam / break dan drop seed lebihan",
+            Desc = "Panen pohon ready -> ambil block -> break -> tanam; ulang otomatis",
             Value = false,
             Callback = function(on)
                 if on then Pabrik.start() elseif Pabrik.Running then Pabrik.stop() end
@@ -12132,7 +12247,9 @@ do (function()
                 ("Break  : %s | tile %d"):format(Pabrik.BreakX >= 0 and ("(" .. Pabrik.BreakX .. "," .. Pabrik.BreakY .. ")")
                     or "belum diatur", countKeys(Pabrik.Tiles)),
                 ("Drop   : %s | sisakan %d, drop saat >= %d"):format(Pabrik.Drop and dropAt or "mati", Pabrik.Keep, Pabrik.DropAt),
-                ("Hasil  : panen %d | tanam %d | di-drop %d"):format(Pabrik.Harvested, Pabrik.Planted, Pabrik.Dropped),
+                "Pola   : panen ready -> ambil block -> break -> tanam",
+                ("Hasil  : panen %d | ambil block %d | tanam %d | di-drop %d"):format(Pabrik.Harvested,
+                    Pabrik.BlocksTaken or 0, Pabrik.Planted, Pabrik.Dropped),
                 "Panen  : " .. Pabrik.harvestStatus(),
                 "Aksi   : " .. Pabrik.Status,
             }, "\n")

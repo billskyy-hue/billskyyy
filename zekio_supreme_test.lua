@@ -390,6 +390,9 @@ local Build = {
     Surface = nil,       -- y permukaan tanah asli (di bawahnya background ikut dipecah)
     Under = {},          -- [baris] = waktu: sementara pasang dari bawah (tidak bisa naik ke baris itu)
     BreakTimes = {},     -- tile yang terus balik lagi setelah digali
+    LavaSkip = {},       -- jeda singkat hanya jika pukulan lava gagal
+    LavaCleared = 0,
+    PunchMs = 200,       -- jeda tangan Dirt Farm; tidak mengubah Auto Farm / Pabrik
     Reserve = 0,         -- block yang tidak boleh dipasang (disisakan untuk bikin seed)
     RESERVE = 10,        -- sisakan block segini saat produksi
     BreakX = -1, BreakY = -1, -- posisi break produksi (belum diatur = otomatis di ujung kanan baris)
@@ -593,13 +596,13 @@ I18N.EN = {
     -- grup sidebar & tab
     ["Fitur"] = "Features", ["Keamanan"] = "Security", ["Setelan"] = "Setup",
     ["Pengaturan"] = "Settings", ["Penjaga"] = "Guard", ["Statistik"] = "Stats", ["Tas"] = "Bag",
-    ["Lahan"] = "Land", ["Pabrik"] = "Factory", ["Koneksi"] = "Connection",
+    ["Dirt Farm"] = "Dirt Farm", ["Pabrik"] = "Factory", ["Koneksi"] = "Connection",
     -- kotak
     ["Kontrol"] = "Controls", ["Mode & Kecepatan"] = "Mode & Speed", ["Kecepatan"] = "Speed",
     ["Karakter"] = "Character", ["Opsi"] = "Options", ["Pesan"] = "Messages",
     ["Aksi saat terdeteksi"] = "Action when detected", ["Waktu"] = "Timing", ["Lainnya"] = "Other",
     ["Quest Harian"] = "Daily Quests", ["Pohon (siap panen)"] = "Trees (ready to harvest)",
-    ["Auto Recycle (buang item)"] = "Auto Recycle (trash items)", ["Bentuk lahan"] = "Land shape",
+    ["Auto Recycle (buang item)"] = "Auto Recycle (trash items)", ["Bentuk Dirt Farm"] = "Dirt Farm shape",
     ["Pilihan"] = "Options", ["Posisi & tile break"] = "Break position & tiles",
     ["Koreksi posisi"] = "Position correction", ["Yang dikirim"] = "What to send",
     -- Farm
@@ -714,8 +717,8 @@ I18N.EN = {
     ["Berdiri di tempat break lalu tekan. Tekan lagi di tempat yang sama = kembali otomatis"] =
         "Stand at the break spot and press. Press again at the same spot = back to automatic",
     ["Pilih tile break produksi (Grid)"] = "Pick production break tiles (Grid)",
-    ["Grid terbuka dalam mode Lahan (terpisah dari Auto Farm & Pabrik)"] =
-        "Grid opens in Land mode (separate from Auto Farm & Factory)",
+    ["Grid terbuka dalam mode Dirt Farm (terpisah dari Auto Farm & Pabrik)"] =
+        "Grid opens in Dirt Farm mode (separate from Auto Farm & Factory)",
     ["Status Vending"] = "Vending Status",
     ["Jalankan Vending"] = "Run Vending",
     ["Jalankan di world vending milikmu"] = "Run it in your vending world",
@@ -805,10 +808,10 @@ I18N.EN = {
     ["Nyala: jalan ke seluruh world. Mati: hanya tile Grid 5x5"] = "On: walk the whole world. Off: only the 5x5 Grid tiles",
     ["Jeda tanam / splice (ms)"] = "Plant / splice delay (ms)",
     -- Lahan
-    ["Status Lahan"] = "Land Status",
-    ["Bangun Lahan"] = "Build Land",
+    ["Status Dirt Farm"] = "Dirt Farm Status",
+    ["Bangun Dirt Farm"] = "Build Dirt Farm",
     ["Hitung block, produksi kalau kurang, lalu pasang dari baris bawah"] = "Count blocks, produce if short, then place from the bottom row",
-    ["Block lahan"] = "Land block",
+    ["Block Dirt Farm"] = "Dirt Farm block",
     ["Block padat dari inventori"] = "Solid block from inventory",
     ["X awal"] = "Start X",
     ["Kolom paling kiri"] = "Leftmost column",
@@ -835,7 +838,7 @@ I18N.EN = {
     ["Seed pabrik"] = "Factory seed",
     ["Block-nya otomatis (contoh: Dirt Seed -> Dirt)"] = "Block is automatic (example: Dirt Seed -> Dirt)",
     ["Tanam di seluruh world"] = "Plant in the whole world",
-    ["Mati = hanya di lahan (tab Lahan)"] = "Off = only on the land (Land tab)",
+    ["Mati = hanya di Dirt Farm (tab Dirt Farm)"] = "Off = only on the Dirt Farm (Dirt Farm tab)",
     ["Pakai posisi sekarang untuk break"] = "Use current position for breaking",
     ["Berdiri di tempat break, lalu tekan"] = "Stand at the break spot, then press",
     ["Pilih tile break (Grid)"] = "Select break tiles (Grid)",
@@ -894,7 +897,7 @@ I18N.EN = {
     ["Aktivitas berhenti (block habis / error)"] = "Activity stopped (out of blocks / error)",
     ["Quest diklaim / redeem berhasil"] = "Quest claimed / redeem successful",
     ["Terlempar / disconnect / masuk lagi"] = "Kicked / disconnected / rejoined",
-    ["Pabrik drop seed / lahan selesai / berhenti"] = "Factory dropped seeds / land done / stopped",
+    ["Pabrik drop seed / Dirt Farm selesai / berhenti"] = "Factory dropped seeds / Dirt Farm done / stopped",
     ["Isi URL webhook dulu"] = "Fill in the webhook URL first",
     ["Pesan tes masuk antrian"] = "Test message queued",
     ["URL webhook tidak valid"] = "Invalid webhook URL",
@@ -950,9 +953,9 @@ I18N.PH = {
     { "di bawahnya berbahaya", "dangerous below" }, { "di bawahnya jurang", "pit below" },
     { "Lewati pijakan", "Skip foothold" }, { "Lewati", "Skip" },
     { "Pukul", "Hit" }, { "Pecah", "Broke" }, { "Panen", "Harvest" }, { "Tanam", "Plant" },
-    { "Pasang lahan: sisa", "Placing land: remaining" }, { "Pasang", "Place" },
+    { "Pasang Dirt Farm: sisa", "Placing Dirt Farm: remaining" }, { "Pasang", "Place" },
     { "Gali: sisa", "Digging: remaining" }, { "Gali", "Dig" }, { "Pukul", "Punch" },
-    { "Tile Break Lahan", "Land Break Tiles" }, { "START LAHAN", "START LAND" }, { "STOP LAHAN", "STOP LAND" },
+    { "Tile Break Dirt Farm", "Dirt Farm Break Tiles" }, { "START DIRT FARM", "START DIRT FARM" }, { "STOP DIRT FARM", "STOP DIRT FARM" },
     { "Semua vending item terpilih sudah kosong", "All vendings of the selected items are empty" },
     { "semua item yang bisa dijual", "all sellable items" },
     { " - coba lagi", " - retrying" }, { "Tambah stock gagal:", "Adding stock failed:" },
@@ -977,7 +980,7 @@ I18N.PH = {
     { "Block saja", "Blocks only" }, { "Seed saja", "Seeds only" },
     { "Posisi break produksi", "Production break position" }, { "otomatis", "automatic" },
     { "kanan karakter, dekat ujung baris", "right of the character, near the row end" },
-    { "grid lahan", "land grid" }, { "posisi break lahan", "land break position" },
+    { "grid Dirt Farm", "Dirt Farm grid" }, { "posisi break Dirt Farm", "Dirt Farm break position" },
     { "Ke vending", "To vending" }, { "): tambah", "): add" }, { "): ambil", "): take" },
     { "Gagal tambah stock di", "Failed to add stock at" }, { "Tidak bisa ke vending", "Can't reach vending" },
     { "Semua vending penuh / belum ada vending yang menjual item", "All vendings full / none sells an item yet" },
@@ -996,26 +999,26 @@ I18N.PH = {
     { "milikmu di world ini | isi", "yours in this world | stocked" }, { "kosong", "empty" },
     { "diambil", "taken" },
     { "tile gali belum terjangkau, dicoba lagi", "dig tiles not reachable yet, retrying" },
-    { "tile gali dilewati", "dig tiles skipped" }, { "Bersihkan drop di lahan", "Cleaning up drops on the land" },
+    { "tile gali dilewati", "dig tiles skipped" }, { "Bersihkan drop di Dirt Farm", "Cleaning up drops on the Dirt Farm" },
     { "Ambil drop block sisa galian", "Picking up leftover dug blocks" },
     { "Bersihkan drop sisa galian (per baris)", "Cleaning up leftover dug drops (row by row)" },
-    { "Ambil drop sisa di lahan (per baris)", "Picking up leftover drops on the land (row by row)" },
-    { "Bersihkan drop di lahan (per baris)", "Cleaning up drops on the land (row by row)" },
+    { "Ambil drop sisa di Dirt Farm (per baris)", "Picking up leftover drops on the Dirt Farm (row by row)" },
+    { "Bersihkan drop di Dirt Farm (per baris)", "Cleaning up drops on the Dirt Farm (row by row)" },
     { "Bersihkan drop baris y", "Cleaning drops on row y" },
     { "Block habis, produksi 1 baris dulu", "Out of blocks, producing on 1 row first" },
     { "lanjut pasang", "resuming placing" }, { "sisakan", "keep" }, { "baris y", "row y" },
     { "Jalan ke posisi pasang-pecah", "Walking to the place-break spot" },
     { "Naik tangga ke", "Climbing stairs to" }, { "belum terjangkau, dilewati sebentar", "not reachable yet, skipped for a while" },
-    { "Tidak ada baris lahan (cek X awal / X akhir / Y baris atas)", "No land rows (check start X / end X / top row Y)" },
+    { "Tidak ada baris Dirt Farm (cek X awal / X akhir / Y baris atas)", "No Dirt Farm rows (check start X / end X / top row Y)" },
     { "Belum ada baris lengkap", "No complete row yet" }, { "seed-nya tidak ketemu", "its seed was not found" },
     { "celah, tangga, background", "gaps, stairs, background" }, { "selesai", "done" },
     { "Produksi block", "Producing blocks" }, { "total butuh", "total needed" },
-    { "Lahan selesai", "Land finished" }, { "Block cukup", "Enough blocks" }, { "mulai pasang", "starting to place" },
+    { "Dirt Farm selesai", "Dirt Farm finished" }, { "Block cukup", "Enough blocks" }, { "mulai pasang", "starting to place" },
     { "Block habis, masih kurang", "Out of blocks, still short" }, { "Seed & block habis", "Seeds & blocks used up" },
     { "tidak ada pohon tumbuh", "no trees growing" }, { "Butuh", "Need" }, { "Seed habis", "Out of seeds" },
     { "seed-nya tidak ketemu", "its seed was not found" }, { "Block kurang", "Blocks short" },
     { "Sisa tile belum terjangkau / terhalang, dicoba lagi", "Remaining tiles unreachable / blocked, retrying" },
-    { "Lahan penuh, menunggu", "Land is full, waiting" }, { "Bukan di world pabrik", "Not in the factory world" },
+    { "Dirt Farm penuh, menunggu", "Dirt Farm is full, waiting" }, { "Bukan di world pabrik", "Not in the factory world" },
     { "menunggu...", "waiting..." }, { "Pergi ke", "Going to" }, { "untuk drop", "to drop" }, { "Pulang ke", "Returning to" },
     { "Gagal pulang ke world pabrik", "Failed to return to factory world" }, { "Drop gagal", "Drop failed" },
     { "tidak bisa drop di posisi ini", "can't drop at this position" },
@@ -1023,7 +1026,7 @@ I18N.PH = {
     { "Posisi drop belum diatur", "Drop position not set" }, { "drop dilewati", "drop skipped" },
     { "Posisi drop dihapus", "Drop position cleared" }, { "Posisi drop", "Drop position" }, { "Posisi break", "Break position" },
     { "di posisi pabrik", "at the factory position" }, { "Pabrik berhenti", "Factory stopped" },
-    { "Bangun Lahan", "Build Land" }, { "Pabrik", "Factory" }, { "Penjaga", "Guard" }, { "Lahan", "Land" },
+    { "Bangun Dirt Farm", "Build Dirt Farm" }, { "Pabrik", "Factory" }, { "Penjaga", "Guard" }, { "Dirt Farm", "Dirt Farm" },
     { "Gagal masuk lagi ke", "Failed to rejoin" }, { "Gagal masuk", "Failed to enter" }, { "Gagal keluar world", "Failed to leave world" },
     { "Dicoba lagi nanti", "Will retry later" }, { "dicoba lagi", "retrying" },
     { "Gagal splice", "Splice failed" }, { "ditolak server", "rejected by server" }, { "Splice jadi", "Spliced into" },
@@ -1046,7 +1049,7 @@ I18N.PH = {
     { "Aktifkan Auto Harvest atau Auto Plant", "Enable Auto Harvest or Auto Plant" },
     { "Pilih seed dulu untuk Auto Plant", "Select a seed for Auto Plant first" },
     { "Pilih seed pabrik dulu", "Select a factory seed first" }, { "Block dari seed ini tidak ketemu", "Block for this seed not found" },
-    { "Atur lahan dulu", "Set up the land first" }, { "Pilih block padat untuk lahan", "Select a solid block for the land" },
+    { "Atur Dirt Farm dulu", "Set up the Dirt Farm first" }, { "Pilih block padat untuk Dirt Farm", "Select a solid block for the Dirt Farm" },
     { "Pilih Seed A dan Seed B dulu", "Select Seed A and Seed B first" }, { "Seed A dan Seed B harus beda", "Seed A and Seed B must differ" },
     { "Kombinasi ini tidak bisa di-splice", "This combination can't be spliced" },
     { "Pilih tile dulu di Grid Tile", "Select tiles in the Tile Grid first" }, { "Pilih block dari inventori", "Select a block from inventory" },
@@ -1121,13 +1124,13 @@ I18N.PH = {
     { "titik kedatangan", "arrival point" }, { "hasil panen", "harvest" }, { "sisakan seed", "keep seeds" },
     { "Dipakai", "Used by" }, { "Di-drop", "Dropped" }, { "Catatan", "Note" }, { "Titik", "Point" },
     { "Produksi", "Production" }, { "Drop seed", "Seed drop" },
-    { "Tidak ada baris yang muat (Y atas terlalu bawah). Berdiri di pojok kiri-ATAS lahan lalu tekan 'Pakai posisi karakter'",
-        "No rows fit (top Y too low). Stand at the TOP-LEFT corner of the land, then press 'Use character position'" },
+    { "Tidak ada baris yang muat (Y atas terlalu bawah). Berdiri di pojok kiri-ATAS Dirt Farm lalu tekan 'Pakai posisi karakter'",
+        "No rows fit (top Y too low). Stand at the TOP-LEFT corner of the Dirt Farm, then press 'Use character position'" },
     { "tidak ada baris yang muat (Y atas terlalu bawah)", "no rows fit (top Y too low)" },
     { "berdiri di pojok kiri-atas lalu tekan 'Pakai posisi karakter'", "stand at the top-left corner, then press 'Use character position'" },
-    { "Tidak bisa ke awal lahan", "Can't reach the land start" }, { "Pecah anak tangga", "Breaking stair step" },
+    { "Tidak bisa ke awal Dirt Farm", "Can't reach the Dirt Farm start" }, { "Pecah anak tangga", "Breaking stair step" },
     { "Pasang anak tangga", "Placing stair step" }, { "Turun ke anak tangga", "Stepping down to stair step" },
-    { "Bersihkan tile lahan", "Clearing land tile" }, { "Ambil drop", "Picking up drop" },
+    { "Bersihkan tile Dirt Farm", "Clearing Dirt Farm tile" }, { "Ambil drop", "Picking up drop" },
     { "1 kosong per baris, tangga kiri & kanan", "1 gap per row, stairs on left & right" },
     { "titik drop belum diatur", "drop point not set" }, { "otomatis saat", "automatic at" },
     { "Dipakai: Pabrik (seed) & Auto Farm (otomatis saat item ~190)",
@@ -3293,7 +3296,7 @@ local function farmLoop(runId)
                 active = nextActive
 
                 if hit then
-                    local gap = State.BreakMs / 1000
+                    local gap = ((State.Override and State.Override.breakMs) or State.BreakMs) / 1000
                     if rayDir then gap = math.max(gap, 0.35) end -- jeda Rayman asli
                     local rest = gap - (os.clock() - t0)
                     if rest > 0.005 then task.wait(rest) end
@@ -3313,7 +3316,7 @@ local function farmLoop(runId)
                 stopFarm("Block " .. itemName(sel) .. " di inventori habis")
                 return
             end
-            if not waitMs(State.BreakMs) then break end
+            if not waitMs((State.Override and State.Override.breakMs) or State.BreakMs) then break end
         end
 
         State.Cycles += 1
@@ -7178,7 +7181,7 @@ local function pabrikLoop(runId)
             elseif blocks > 0 and (Pabrik.BreakX < 0 or next(Pabrik.Tiles) == nil) then
                 Pabrik.Status = "Ada block tapi posisi / tile break belum diatur"
             elseif seeds > 0 then
-                Pabrik.Status = "Lahan penuh, menunggu"
+                Pabrik.Status = "Dirt Farm penuh, menunggu"
             else
                 Pabrik.Status = "Menunggu..."
             end
@@ -7217,7 +7220,7 @@ function Pabrik.start()
     elseif not block then
         err = "Block dari seed ini tidak ketemu"
     elseif not Pabrik.WholeWorld and #landRows() == 0 then
-        err = "Atur lahan dulu (tab Lahan)"
+        err = "Atur Dirt Farm dulu (tab Dirt Farm)"
     end
     if err then
         notify("Pabrik", err, 4)
@@ -8032,7 +8035,8 @@ function Build.carveLayer(x, y, W)
     local fg = fgIdAt(x, y)
     if fg ~= 0 then
         local it = ItemDB[fg]
-        if it and it.kind ~= "seed" and (it.solid or it.deadly or it.hurts) and canBreak(fg) then return "fg" end
+        if it and it.kind ~= "seed" and (it.solid or it.deadly or it.hurts or it.laser or Build.isLava(fg))
+            and canBreak(fg) then return "fg" end
         return nil
     end
     if y >= (Build.Surface or math.huge) or Build.Carved[y * W + x] then
@@ -8049,9 +8053,10 @@ end
 --   Lantai lahan di dalam tanah yang bolong (gua) / lava ditambal block sambil lewat.
 function Build.carveList(P)
     local W, list = P.W, {}
+    local pass, direction
     local function add(x, y, kind)
         if y >= 0 and Build.carveLayer(x, y, W) then
-            list[#list + 1] = { x = x, y = y, idx = y * W + x, kind = kind }
+            list[#list + 1] = { x = x, y = y, idx = y * W + x, kind = kind, pass = pass, dir = direction }
         end
     end
     local surf = Build.Surface or math.huge
@@ -8064,13 +8069,15 @@ function Build.carveList(P)
             need = canFill
         elseif not Build.done(x, y) then
             local it = ItemDB[id]
-            need = it ~= nil and it.kind ~= "seed" and (it.deadly or it.hurts) and canBreak(id) and true or false
+            need = it ~= nil and it.kind ~= "seed" and (it.deadly or it.hurts or it.laser or Build.isLava(id))
+                and canBreak(id) and true or false
         end
-        if need then list[#list + 1] = { x = x, y = y, idx = y * W + x, kind = "fill" } end
+        if need then list[#list + 1] = { x = x, y = y, idx = y * W + x, kind = "fill", pass = pass, dir = direction } end
     end
     for k = 1, P.K do
         local y = P.rows[k]
         local d = ((k - 1) % 2 == 0) and 1 or -1
+        pass, direction = k, d
         local up = nil -- lubang ujung awal baris di atasnya, dibuka dari celah ini
         if k > 1 and #P.holes[k - 1] > 0 then
             local ph = P.holes[k - 1]
@@ -8093,6 +8100,111 @@ function Build.carveList(P)
     return list
 end
 
+-- Lava/bahaya di area Dirt Farm didahulukan, termasuk lava di lantai.
+-- Seed dan item yang dilindungi tidak masuk daftar ini.
+function Build.isLava(id)
+    local it = ItemDB[id]
+    if not it or it.kind == "seed" or not canBreak(id) then return false end
+    local name = string.lower(tostring(it.name or ""))
+    return (it.lava or it.deadly or it.hurts or it.laser
+        or string.find(name, "lava", 1, true) or string.find(name, "magma", 1, true)) and true or false
+end
+
+function Build.lavaTarget(P, s)
+    local w = Refs.World
+    P, s = P or Build.ActivePlan, s or playerState()
+    if not w or not P or not s or s.dead or not s.grounded then return nil end
+    local R, cy = punchReach() - 0.08, s.y - 0.475
+    local best, distance
+    for y = math.max(0, P.rows[1] - 1, floor(cy - R - 0.5)),
+        math.min(w.h - 1, P.rows[P.K], floor(cy + R + 0.5)) do
+        for x = math.max(P.x0, floor(s.x - R - 0.5)), math.min(P.x1, floor(s.x + R + 0.5)) do
+            if stateReaches(s, x, y, R) and Build.isLava(fgIdAt(x, y)) and canWorkAt(x, y) then
+                local foot = floor(s.y + 0.01)
+                local under = y == foot and x >= floor(s.x - 0.3) and x <= floor(s.x + 0.3 - 0.0001)
+                local drop = 0
+                if under then drop = fallAfterBreak(s, x, foot) end
+                if not under or (drop ~= nil and drop <= 3) then
+                    local dx, dy = x + 0.5 - s.x, y + 0.5 - cy
+                    local d = dx * dx + dy * dy
+                    if not distance or d < distance then
+                        best, distance = { x = x, y = y, idx = y * w.w + x, kind = "lava" }, d
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- Jeda dipakai sebelum pukulan berikutnya, tanpa menambah jeda sesudah tile
+-- selesai. Tunggu balasan singkat agar tile yang hilang terlambat tetap dihitung.
+function Build.punch(x, y, includeBg, live)
+    live = live or function() return Build.Running end
+    local w = Refs.World
+    local function valid() return live() and alive() and Refs.World == w end
+    if not w or not valid() then return nil, "stop" end
+    local layer = fgIdAt(x, y) ~= 0 and "fg" or "bg"
+    local id = tileAt(layer, x, y)
+    if not id or id == 0 or (layer == "bg" and not includeBg) then return "changed" end
+    while valid() and os.clock() < (Build.NextPunchAt or 0) do
+        local lava = Build.lavaTarget()
+        if lava and (lava.x ~= x or lava.y ~= y) and not Build.isLava(id) then return nil, "lava" end
+        task.wait(math.min(0.025, Build.NextPunchAt - os.clock()))
+    end
+    if not valid() then return nil, "stop" end
+    if tileAt(layer, x, y) ~= id then return "changed" end
+    local s = playerState()
+    if not s or s.dead or not s.grounded or not stateReaches(s, x, y, punchReach() - 0.08) then
+        return nil, "range"
+    end
+    if not canWorkAt(x, y) then return nil, "permission" end
+    local lava = Build.lavaTarget()
+    if lava and (lava.x ~= x or lava.y ~= y) and not Build.isLava(id) then return nil, "lava" end
+    if type(Refs.Punch) ~= "function" then
+        Build.Status = "Fungsi pukul game belum terbaca; tekan Hubungkan ke game"
+        return nil, "punch"
+    end
+    local before = State.Broken
+    local result = tryBreak(x, y, includeBg)
+    if not result then Build.Status = State.LastAction or "Pukulan game gagal; tekan Hubungkan ke game" end
+    Build.NextPunchAt = os.clock() + math.max(200, Build.PunchMs or 200) / 1000
+    if result == "hit" then
+        while valid() and tileAt(layer, x, y) == id and os.clock() < Build.NextPunchAt do
+            task.wait(math.min(0.025, Build.NextPunchAt - os.clock()))
+        end
+        if not valid() then return nil, "stop" end
+        if tileAt(layer, x, y) ~= id then
+            if State.Broken == before then
+                State.Broken += 1
+                Drops.brokeAt[x .. "," .. y] = os.clock()
+            end
+            result = "broke"
+        end
+    end
+    return result
+end
+
+function Build.lavaStep(P, live)
+    local t = Build.lavaTarget(P)
+    if not t then return false end
+    if skipped(Build.LavaSkip, t.idx) then
+        Build.Status = "Lava masih ada; menunggu pukulan game bisa dicoba lagi"
+        waitAuto(100)
+        return true
+    end
+    Build.Status = ("Prioritas lava: %s (%d,%d)"):format(itemName(fgIdAt(t.x, t.y)), t.x, t.y)
+    local world, dug = Refs.World, Build.Dug
+    local result = Build.carveTile(t, live, true)
+    if (result == "done" or result == "fall") and Refs.World == world and Build.Dug > dug
+        and not Build.isLava(fgIdAt(t.x, t.y)) then
+        Build.LavaCleared = (Build.LavaCleared or 0) + 1
+    elseif result == "skip" then
+        skipTile(Build.LavaSkip, t.idx, 1)
+    end
+    return true
+end
+
 -- Jalan (A*) ke tempat yang menjangkau salah satu target.
 -- maxY = tempat berdiri tidak boleh lebih bawah dari ini, noSelf = jangan berdiri di tile target.
 -- Hasil: "move" | "nopath" | "wait"
@@ -8100,6 +8212,7 @@ function Build.goNear(targets, R, maxY, noSelf)
     local w = Refs.World
     local s = playerState()
     if not w or not s then return "wait" end
+    if Build.lavaTarget() then return "wait" end
     local sx, sy = startNode(s)
     local goals = { maxY = maxY, noSelf = noSelf }
     for _, t in ipairs(targets) do goals[t.idx] = true end
@@ -8114,10 +8227,12 @@ function Build.goNear(targets, R, maxY, noSelf)
     if #path == 0 then
         execWalk(sx, sy) -- sudah di tempat tapi belum terjangkau: rapikan ke tengah tile
         fails += 1
-    elseif not followPath(path) then
-        fails += 1
     else
-        fails = 0
+        local ok, why = followPath(path, function()
+            return not Build.Running or not alive() or Refs.World ~= w or Build.lavaTarget() ~= nil
+        end)
+        if why == "cancelled" then releaseInput(); return "wait" end
+        if not ok then fails += 1 else fails = 0 end
     end
     releaseInput()
     if fails >= 4 then
@@ -8130,19 +8245,29 @@ end
 
 -- Pukul 1 tile sampai bersih (block dulu, lalu background).
 -- Hasil: "done" | "fall" (karakter jatuh) | "skip" | "stop"
-function Build.carveTile(t, live)
+function Build.carveTile(t, live, onlyFg)
+    local w = Refs.World
+    if not w then return "stop" end
     local hits, maxHits = 0, nil
-    while live() and alive() do
-        local layer = Build.carveLayer(t.x, t.y, Refs.World.w)
+    while live() and alive() and Refs.World == w do
+        if onlyFg and not Build.isLava(fgIdAt(t.x, t.y)) then return "done" end
+        local lava = Build.lavaTarget()
+        if not onlyFg and lava and (lava.x ~= t.x or lava.y ~= t.y) then return "lava" end
+        local layer = onlyFg and "fg" or Build.carveLayer(t.x, t.y, Refs.World.w)
         if not layer then return "done" end
         local id = (layer == "fg") and fgIdAt(t.x, t.y) or (tileAt("bg", t.x, t.y) or 0)
         maxHits = maxHits or (hitsNeeded(id) * 3 + 6)
-        local r = tryBreak(t.x, t.y, layer == "bg")
+        local r, why = Build.punch(t.x, t.y, layer == "bg", live)
+        if why == "lava" then return "lava" end
+        if why == "stop" then return "stop" end
+        if why == "range" then return "fall" end
         if r == nil then
             skipTile(Build.Skip, t.idx, 60)
             return "skip"
         end
-        if r == "broke" then
+        if r == "changed" then
+            hits, maxHits = 0, nil
+        elseif r == "broke" then
             if layer == "fg" then Build.Carved[t.idx] = true end
             Build.Dug += 1
             Build.Status = ("Gali %s (%d,%d)"):format(itemName(id), t.x, t.y)
@@ -8155,7 +8280,6 @@ function Build.carveTile(t, live)
             hits, maxHits = 0, nil
             local s = playerState()
             if not s or not s.grounded then
-                waitAuto(State.BreakMs)
                 return "fall"
             end
         else
@@ -8166,7 +8290,7 @@ function Build.carveTile(t, live)
                 return "skip"
             end
         end
-        if not waitAuto(State.BreakMs) then return "stop" end
+        -- Build.punch menjaga cooldown bersama; tidak ada jeda tambahan di sini.
     end
     return "stop"
 end
@@ -8178,13 +8302,16 @@ function Build.fillTile(t)
     if id ~= 0 and not Build.done(t.x, t.y) then
         Build.Status = ("Pecah %s di lantai (%d,%d)"):format(itemName(id), t.x, t.y)
         for _ = 1, 40 do
-            local r = tryBreak(t.x, t.y, false)
+            local r, why = Build.punch(t.x, t.y, false)
+            if why == "lava" then return "lava" end
+            if why == "stop" then return "stop" end
+            if why == "range" then return "fall" end
             if r == nil then
                 skipTile(Build.Skip, t.idx, 60)
                 return "skip"
             end
             if r == "broke" then break end
-            if not waitAuto(State.BreakMs) then return "stop" end
+            if fgIdAt(t.x, t.y) == 0 then break end
         end
         local cur = playerState()
         if not cur or not cur.grounded then return "fall" end
@@ -8195,7 +8322,7 @@ function Build.fillTile(t)
             skipTile(Build.Skip, t.idx, 30)
             return "skip"
         end
-        Build.Status = ("Tambal lantai lahan (%d,%d)"):format(t.x, t.y)
+        Build.Status = ("Tambal lantai Dirt Farm (%d,%d)"):format(t.x, t.y)
         if not waitAuto(State.PlaceMs) then return "stop" end
     end
     return "done"
@@ -8203,6 +8330,7 @@ end
 
 -- 1 langkah gali. Hasil: "work" | "move" | "wait" | "none"
 function Build.carveStep(P, list, live)
+    Build.ActivePlan = P
     local w = Refs.World
     local s = playerState()
     if not w or not s or s.dead then
@@ -8218,25 +8346,44 @@ function Build.carveStep(P, list, live)
     end
     Move.AirAt = nil
     releaseInput()
+    if Build.lavaStep(P, live) then return "work" end
     local R = punchReach() - 0.08
     local now = os.clock()
-    local fi = nil
-    for i, t in ipairs(list) do
-        if not skipped(Build.Skip, t.idx, now) then
-            fi = i
-            break
+    local route = Build.Route
+    if not route or route.world ~= w or route.x0 ~= P.x0 or route.x1 ~= P.x1 or route.lastY ~= P.rows[P.K] then
+        route = { world = w, x0 = P.x0, x1 = P.x1, lastY = P.rows[P.K], pass = 1 }
+        Build.Route = route
+    end
+    local pass, firstPass
+    for _, t in ipairs(list) do
+        if not skipped(Build.Skip, t.idx, now) and (t.kind == "fill" or Build.carveLayer(t.x, t.y, P.W)) then
+            local p = t.pass or 1
+            if not firstPass or p < firstPass then firstPass = p end
+            if p >= route.pass and (not pass or p < pass) then pass = p end
         end
     end
-    if not fi then return "none" end
-    -- pecah yang terjangkau dari sini sesuai urutan (berhenti di tile pertama yang tidak terjangkau)
+    pass = pass or firstPass
+    if not pass then return "none" end
+    route.pass = pass
+    local pending, near = {}, {}
+    for _, t in ipairs(list) do
+        if (t.pass or 1) == pass and not skipped(Build.Skip, t.idx, now) then
+            pending[#pending + 1] = t
+            if stateReaches(s, t.x, t.y, R) then near[#near + 1] = t end
+        end
+    end
+    -- Selesaikan semua tile terjangkau di lintasan ini. Target jauh di awal
+    -- daftar tidak lagi memaksa balik ke ujung baris sebelum bekerja di sini.
     local did = 0
-    for j = fi, math.min(#list, fi + 5) do
-        local t = list[j]
+    for _, t in ipairs(near) do
+        if did >= 12 or not live() or not alive() or Refs.World ~= w then break end
+        if Build.lavaStep(P, live) then return "work" end
         if not skipped(Build.Skip, t.idx, now) then
             local cur = playerState()
             if not cur or cur.dead or not cur.grounded or not stateReaches(cur, t.x, t.y, R) then break end
-            if t.kind == "fill" and overlapsPlayer(t.x, t.y, cur) then break end -- berdiri di lubangnya: pindah dulu
-            if not canWorkAt(t.x, t.y) then
+            if t.kind == "fill" and overlapsPlayer(t.x, t.y, cur) then
+                skipTile(Build.Skip, t.idx, 0.5) -- rapikan posisi sesudah target lain selesai
+            elseif not canWorkAt(t.x, t.y) then
                 skipTile(Build.Skip, t.idx, 300) -- dikunci orang lain
             elseif t.kind == "fill" then
                 did += 1
@@ -8248,22 +8395,38 @@ function Build.carveStep(P, list, live)
                     local d = fallAfterBreak(cur, t.x, foot)
                     if d == nil or d > 3 then
                         skipTile(Build.Skip, t.idx, 20)
-                        break
+                        -- tile lain dalam jangkauan tetap boleh dikerjakan
+                    else
+                        did += 1
+                        if Build.carveTile(t, live) ~= "done" then break end
                     end
+                else
+                    did += 1
+                    if Build.carveTile(t, live) ~= "done" then break end
                 end
-                did += 1
-                if Build.carveTile(t, live) ~= "done" then break end
             end
         end
     end
     if did > 0 then return "work" end
-    local F = list[fi]
-    local r = Build.goNear({ F }, math.min(punchReach(), buildReach()) - 0.35, nil, F.kind == "fill")
+    if not live() or not alive() or Refs.World ~= w then return "wait" end
+    local cur = playerState() or s
+    local dir = pending[1] and pending[1].dir or 1
+    table.sort(pending, function(a, b)
+        local da = abs(a.x + 0.5 - cur.x) + 2 * abs(a.y + 0.5 - (cur.y - 0.475))
+        local db = abs(b.x + 0.5 - cur.x) + 2 * abs(b.y + 0.5 - (cur.y - 0.475))
+        if da ~= db then return da < db end
+        if a.x ~= b.x then return a.x * dir < b.x * dir end
+        return a.kind == "fill" and b.kind ~= "fill"
+    end)
+    local goals = {}
+    for _, t in ipairs(pending) do
+        if not skipped(Build.Skip, t.idx) and #goals < 8 then goals[#goals + 1] = t end
+    end
+    if #goals == 0 then return "none" end
+    local r = Build.goNear(goals, math.min(punchReach(), buildReach()) - 0.35, nil, goals[1].kind == "fill")
     if r == "nopath" then
-        -- belum ada jalan ke sini: lewati sebaris dulu (tidak cari jalan berulang per tile)
-        for _, t in ipairs(list) do
-            if t.y == F.y then skipTile(Build.Skip, t.idx, 30) end
-        end
+        -- Kelompok ini saja ditunda; jangan tandai seluruh baris gagal.
+        for _, t in ipairs(goals) do skipTile(Build.Skip, t.idx, 5) end
         return "move"
     end
     return r
@@ -8288,6 +8451,7 @@ end
 -- Baris yang sedang dipasang jadi jembatan: berdiri di atasnya lalu pasang ke depan.
 -- Hasil: "work" | "move" | "wait" | "none"
 function Build.placeStep(P)
+    Build.ActivePlan = P
     local w = Refs.World
     local s = playerState()
     if not w or not s or s.dead then
@@ -8303,6 +8467,7 @@ function Build.placeStep(P)
     end
     Move.AirAt = nil
     releaseInput()
+    if Build.lavaStep(P, function() return Build.Running end) then return "work" end
     local W = P.W
     local R = buildReach() - 0.08
     local now = os.clock()
@@ -8349,20 +8514,21 @@ function Build.placeStep(P)
                 if not canWorkAt(t.x, t.y) then
                     skipTile(Build.Skip, t.idx, 300)
                 else
-                    Build.Status = ("Bersihkan tile lahan (%d,%d)"):format(t.x, t.y)
+                    Build.Status = ("Bersihkan tile Dirt Farm (%d,%d)"):format(t.x, t.y)
                     local broke = false
                     for _ = 1, 40 do
-                        local r = tryBreak(t.x, t.y, false)
+                        local r, why = Build.punch(t.x, t.y, false)
+                        if why == "lava" then return "work" end
+                        if why == "stop" or why == "range" then return "wait" end
                         if r == nil then break end -- tidak bisa dipecah (lock, pintu, dll)
                         if r == "broke" then
                             broke = true
                             break
                         end
-                        if not waitAuto(State.BreakMs) then return "wait" end
                     end
                     -- tidak bisa dibersihkan: jangan didatangi ulang terus (bikin bolak-balik jauh)
                     if not broke then skipTile(Build.Skip, t.idx, 1800) end
-                    waitNearDrops(0.5)
+                    waitNearDrops(0.15)
                 end
                 return "work"
             end
@@ -8491,20 +8657,22 @@ end
 -- Sesi break produksi di posisi & grid lahan (mesin Auto Farm: multi tile, sentuh drop tiap putaran).
 -- Berhenti kalau seed sudah cukup untuk mengisi baris, block habis, atau 8 dtk tidak ada aksi.
 function Build.breakSession(o)
+    if Build.lavaTarget() then return false end
     local s = playerState()
     if not s then return false end
     local hx, hy = startNode(s)
     if hx ~= Build.BreakX or hy ~= Build.BreakY then
-        Build.Status = ("Jalan ke posisi break lahan (%d,%d)"):format(Build.BreakX, Build.BreakY)
-        if not walkTo(Build.BreakX, Build.BreakY, 45) then
-            Build.Status = "Gagal jalan ke posisi break lahan, pakai posisi otomatis"
+        Build.Status = ("Jalan ke posisi break Dirt Farm (%d,%d)"):format(Build.BreakX, Build.BreakY)
+        if not walkTo(Build.BreakX, Build.BreakY, 45, function() return not o.live() or Build.lavaTarget() ~= nil end) then
+            if Build.lavaTarget() or not o.live() then return false end
+            Build.Status = "Gagal jalan ke posisi break Dirt Farm, pakai posisi otomatis"
             return nil
         end
     end
     if not o.live() then return false end
     local before = invCount(o.seed)
     local want = math.max(1, Build.freeSpots(o))
-    State.Override = { offsets = Build.Tiles, block = o.block, mode = "Place + Break" }
+    State.Override = { offsets = Build.Tiles, block = o.block, mode = "Place + Break", breakMs = Build.PunchMs or 200 }
     State.Quiet = true
     table.clear(HitCount)
     table.clear(PlacedAt)
@@ -8514,18 +8682,19 @@ function Build.breakSession(o)
     local lastActs, lastActAt = State.Placed + State.Broken, os.clock()
     task.spawn(function() -- pengawas sesi break
         while State.Running and State.RunId == id do
-            task.wait(0.5)
+            task.wait(0.1)
+            if not State.Running or State.RunId ~= id then break end
             local acts = State.Placed + State.Broken
             if acts ~= lastActs then lastActs, lastActAt = acts, os.clock() end
-            if not o.live() or invCount(o.seed) >= before + want or invCount(o.block) <= 0
+            if not o.live() or Build.lavaTarget() or invCount(o.seed) >= before + want or invCount(o.block) <= 0
                 or os.clock() - lastActAt > 8 then
                 State.Running = false
             end
         end
     end)
-    Build.Status = ("Break %s di posisi break lahan (%d,%d)"):format(itemName(o.block), Build.BreakX, Build.BreakY)
+    Build.Status = ("Break %s di posisi break Dirt Farm (%d,%d)"):format(itemName(o.block), Build.BreakX, Build.BreakY)
     local ok, e = pcall(farmLoop, id)
-    if not ok then warn("[Zekio supreme TEST] Break lahan error: " .. tostring(e)) end
+    if not ok then warn("[Zekio supreme TEST] Break Dirt Farm error: " .. tostring(e)) end
     State.Running = false
     State.Override = nil
     State.Quiet = false
@@ -8551,7 +8720,7 @@ end
 -- Pasang lalu pecah block di KANAN karakter untuk dapat seed (seperti Pabrik)
 function Build.bootstrap(o)
     local w = Refs.World
-    if not w or invCount(o.block) <= 0 then return false end
+    if not w or invCount(o.block) <= 0 or Build.lavaTarget() then return false end
     if Build.BreakX >= 0 and next(Build.Tiles) ~= nil then
         local r = Build.breakSession(o)
         if r ~= nil then return r end -- nil = tidak bisa ke posisi break: pakai cara otomatis
@@ -8563,13 +8732,14 @@ function Build.bootstrap(o)
         if s0 then hx, hy = startNode(s0) end
         if hx ~= o.stand.x or hy ~= o.stand.y then
             Build.Status = ("Jalan ke posisi pasang-pecah (%d,%d)"):format(o.stand.x, o.stand.y)
-            if not walkTo(o.stand.x, o.stand.y, 45) then o.stand = nil end
+            if not walkTo(o.stand.x, o.stand.y, 45, function() return not o.live() or Build.lavaTarget() ~= nil end) then o.stand = nil end
         end
         if o.stand and o.tile then
             local id = fgIdAt(o.tile.x, o.tile.y)
             if id == o.block or (id == 0 and placeOk(o.tile.x, o.tile.y)) then spot = o.tile end
         end
     end
+    if Build.lavaTarget() or not o.live() then return false end
     local s = playerState()
     if not s or not s.grounded then return false end
     if not spot then
@@ -8592,7 +8762,7 @@ function Build.bootstrap(o)
     local before = invCount(o.seed)
     local want = math.max(1, Build.freeSpots(o))
     for _ = 1, 300 do
-        if not o.live() or (invCount(o.block) <= 0 and fgIdAt(spot.x, spot.y) == 0) then break end
+        if not o.live() or Build.lavaTarget() or (invCount(o.block) <= 0 and fgIdAt(spot.x, spot.y) == 0) then break end
         if invCount(o.seed) >= before + want then break end
         if fgIdAt(spot.x, spot.y) == 0 then
             sendSetTile("fg", spot.x, spot.y, o.block)
@@ -8603,9 +8773,9 @@ function Build.bootstrap(o)
         end
         for _ = 1, 40 do
             if not o.live() then break end
-            local r = tryBreak(spot.x, spot.y, false)
+            local r, why = Build.punch(spot.x, spot.y, false, o.live)
+            if why == "lava" or why == "stop" or why == "range" then return false end
             if r == nil or r == "broke" then break end
-            if not waitAuto(State.BreakMs) then break end
         end
         -- tunggu drop muncul (datang dari server), lalu ambil dengan sentuhan: melangkah masuk lalu balik
         Drops.waitSpawn({ spot })
@@ -8680,7 +8850,7 @@ function Build.sweep(P, live, ids, maxSec)
     if not Drops.list then return 0 end
     local x0, x1 = P.x0, P.x1 + 1
     local y0, y1 = math.max(0, P.rows[1] - 1), P.rows[P.K] + 1
-    return Move.fetchDrops(live, 999, function(d)
+    return Move.fetchDrops(function() return live() and not Build.lavaTarget(P) end, 999, function(d)
         return d.x >= x0 and d.x < x1 and d.y >= y0 and d.y < y1 and (not ids or ids[d.id] == true)
     end, maxSec or 60)
 end
@@ -8693,8 +8863,8 @@ function Build.stop(reason)
     Build.Phase = reason or "Dihentikan"
     if UI.BuildToggle then pcall(function() UI.BuildToggle:Set(false) end) end
     if reason then
-        notify("Bangun Lahan", reason, 5)
-        if not string.find(reason, "^Dihentikan") then Hook.send("pabrik", "Bangun Lahan: " .. reason) end
+        notify("Bangun Dirt Farm", reason, 5)
+        if not string.find(reason, "^Dihentikan") then Hook.send("pabrik", "Bangun Dirt Farm: " .. reason) end
     end
 end
 
@@ -8708,9 +8878,11 @@ local function buildLoop(runId)
         task.wait()
         local P = Build.plan()
         if not P then
-            Build.stop("Tidak ada baris lahan (cek X awal / X akhir / Y baris atas)")
+            Build.stop("Tidak ada baris Dirt Farm (cek X awal / X akhir / Y baris atas)")
             break
         end
+        Build.ActivePlan = P
+        if Build.lavaStep(P, live) then continue end
         if Build.Surface == nil then Build.Surface = Build.findSurface(P) end
         local carve = Build.carveList(P)
         local info = landInfo(Build.BlockId, P, carve)
@@ -8726,10 +8898,13 @@ local function buildLoop(runId)
             if r ~= "none" then noneAt = nil end
         end
         if r == "none" and #carve == 0 and not o.dugSwept then
-            -- gali selesai: ambil dulu semua drop sisa galian, per baris
+            -- Ambil bahan hanya jika kurang. Jangan menyusuri seluruh world
+            -- lalu kembali ke awal sebelum pemasangan yang sebenarnya sudah bisa jalan.
             o.dugSwept, o.sweptAt = true, os.clock()
-            Build.Phase = "Bersihkan drop sisa galian (per baris)"
-            Build.sweep(P, live, nil, 600)
+            if invCount(Build.BlockId) < info.need then
+                Build.Phase = "Ambil block sisa galian yang masih dibutuhkan"
+                Build.sweep(P, live, { [Build.BlockId] = true }, 30)
+            end
             continue
         end
         if r == "none" then
@@ -8753,11 +8928,12 @@ local function buildLoop(runId)
                     end
                 end
                 -- 4) BERSIH: ambil semua drop yang tertinggal di lahan
-                Build.Phase = "Bersihkan drop di lahan (per baris)"
-                Build.sweep(P, live, nil, 900)
+                Build.Phase = "Bersihkan drop di Dirt Farm (per baris)"
+                Build.sweep(P, live, nil, 90)
                 if not live() then break end
+                if Build.lavaTarget(P) then continue end
                 local note = (#carve > 0) and (", " .. #carve .. " tile gali dilewati") or ""
-                Build.stop("Lahan selesai (" .. info.done .. " block" .. note .. ")")
+                Build.stop("Dirt Farm selesai (" .. info.done .. " block" .. note .. ")")
                 if Build.ThenPabrik then
                     if not Pabrik.SeedId then Pabrik.SeedId = seed end
                     Pabrik.start()
@@ -8769,7 +8945,7 @@ local function buildLoop(runId)
                 -- 2) PASANG (sisakan block untuk produksi kalau masih kurang)
                 phase = "pasang"
                 Build.Reserve = reserve
-                Build.Phase = ("Pasang lahan: sisa %d tile"):format(info.need)
+                Build.Phase = ("Pasang Dirt Farm: sisa %d tile"):format(info.need)
                     .. ((reserve > 0) and (" (sisakan " .. reserve .. " block)") or "")
                 local pr = Build.placeStep(P)
                 if pr == "none" and invCount(Build.BlockId) > reserve then
@@ -8796,18 +8972,18 @@ local function buildLoop(runId)
                     if os.clock() - (o.sweptAt or -1e9) > 120 then
                         -- ambil dulu drop yang tertinggal di lahan (block, seed & lainnya), per baris
                         o.sweptAt = os.clock()
-                        Build.Phase = "Ambil drop sisa di lahan (per baris)"
-                        Build.sweep(P, live, nil, 300)
+                        Build.Phase = "Ambil drop sisa di Dirt Farm (per baris)"
+                        Build.sweep(P, live, { [Build.BlockId] = true }, 30)
                         continue
                     end
                     phase = "produksi"
                     o.phase, o.rowK = nil, nil
-                    notify("Bangun Lahan", "Block habis, produksi 1 baris dulu", 4)
+                    notify("Bangun Dirt Farm", "Block habis, produksi 1 baris dulu", 4)
                 end
                 local target = math.min(CAP, info.need + Build.RESERVE)
                 if have >= target then
                     phase = "pasang"
-                    notify("Bangun Lahan", "Block cukup (" .. have .. "), lanjut pasang", 4)
+                    notify("Bangun Dirt Farm", "Block cukup (" .. have .. "), lanjut pasang", 4)
                 else
                     if o.rowK and not P.rows[o.rowK] then o.rowK = nil end
                     if o.rowK == nil then
@@ -8865,20 +9041,20 @@ function Build.start()
     elseif not playerState() then
         err = "Kamu belum masuk world"
     elseif not (it and it.solid) then
-        err = "Pilih block padat untuk lahan"
+        err = "Pilih block padat untuk Dirt Farm"
     elseif #landRows() == 0 then
-        err = "Tidak ada baris yang muat (Y atas terlalu bawah). Berdiri di pojok kiri-ATAS lahan lalu tekan 'Pakai posisi karakter'"
+        err = "Tidak ada baris yang muat (Y atas terlalu bawah). Berdiri di pojok kiri-ATAS Dirt Farm lalu tekan 'Pakai posisi karakter'"
     end
     if err then
-        notify("Bangun Lahan", err, 4)
+        notify("Bangun Dirt Farm", err, 4)
         if UI.BuildToggle then pcall(function() UI.BuildToggle:Set(false) end) end
         return
     end
-    if State.Running and not State.Override then stopFarm("Dihentikan karena Bangun Lahan dimulai") end
-    if Clear.Running then stopClear("Dihentikan karena Bangun Lahan dimulai") end
-    if Farmer.Running then stopFarmer("Dihentikan karena Bangun Lahan dimulai") end
-    if Splice.Running and Splice.stop then Splice.stop("Dihentikan karena Bangun Lahan dimulai") end
-    if Pabrik.Running then Pabrik.stop("Dihentikan karena Bangun Lahan dimulai") end
+    if State.Running and not State.Override then stopFarm("Dihentikan karena Bangun Dirt Farm dimulai") end
+    if Clear.Running then stopClear("Dihentikan karena Bangun Dirt Farm dimulai") end
+    if Farmer.Running then stopFarmer("Dihentikan karena Bangun Dirt Farm dimulai") end
+    if Splice.Running and Splice.stop then Splice.stop("Dihentikan karena Bangun Dirt Farm dimulai") end
+    if Pabrik.Running then Pabrik.stop("Dihentikan karena Bangun Dirt Farm dimulai") end
     if not Refs.Trees then findTreeRefs() end
     table.clear(Build.Skip)
     table.clear(BuildFail)
@@ -8886,9 +9062,12 @@ function Build.start()
     table.clear(Build.Row)
     table.clear(Build.Under)
     table.clear(Build.BreakTimes)
+    table.clear(Build.LavaSkip)
     table.clear(BadEdge)
     Build.Surface = nil -- dihitung ulang (permukaan tanah asli)
     Build.Reserve = 0
+    Build.Route, Build.ActivePlan, Build.NextPunchAt = nil, nil, nil
+    Build.LavaCleared = 0
     Land.Cache = nil
     Pabrik.BreakFailUntil = 0
     Build.Running = true
@@ -8900,7 +9079,7 @@ function Build.start()
     task.spawn(function()
         local ok, e = pcall(buildLoop, id)
         if not ok then
-            warn("[Zekio supreme TEST] Bangun Lahan error: " .. tostring(e))
+            warn("[Zekio supreme TEST] Bangun Dirt Farm error: " .. tostring(e))
             if Build.Running then Build.stop("Error: " .. tostring(e)) end
         end
     end)
@@ -9345,13 +9524,13 @@ do (function()
     local function apply()
         local pab = UI.GridMode == "pabrik"
         local lah = UI.GridMode == "lahan"
-        ModeBtn.Text = lah and I18N.T("Lahan") or (pab and I18N.T("Pabrik") or "Farm")
+        ModeBtn.Text = lah and I18N.T("Dirt Farm") or (pab and I18N.T("Pabrik") or "Farm")
         ModeBtn.BackgroundColor3 = lah and Color3.fromRGB(60, 140, 200)
             or (pab and Color3.fromRGB(200, 120, 40) or Color3.fromRGB(60, 60, 75))
-        Title.Text = I18N.T(lah and "Tile Break Lahan" or (pab and "Tile Break Pabrik" or "Grid Tile"))
+        Title.Text = I18N.T(lah and "Tile Break Dirt Farm" or (pab and "Tile Break Pabrik" or "Grid Tile"))
         for key in pairs(CellButtons) do paintCell(key) end
         if lah then
-            GridStart.Text = I18N.T(Build.Running and "STOP LAHAN" or "START LAHAN")
+            GridStart.Text = I18N.T(Build.Running and "STOP DIRT FARM" or "START DIRT FARM")
             GridStart.BackgroundColor3 = Build.Running and Color3.fromRGB(200, 60, 60) or COLOR_ON
         elseif pab then
             GridStart.Text = I18N.T(Pabrik.Running and "STOP PABRIK" or "START PABRIK")
@@ -9492,7 +9671,7 @@ end)() end
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.17 | TEST r22",
+    Author = "v5.9.19 | TEST r24",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -11741,19 +11920,19 @@ end)() end
 
 -- ===== TAB: LAHAN (bangun farm world) =====
 do (function()
-    local LTab = makeTab("Lahan", "layout-grid", "farm")
+    local LTab = makeTab("Dirt Farm", "layout-grid", "farm")
 
     safe(function()
-        UI.LahanStatus = LTab:Paragraph({ Title = "Status Lahan", Desc = "-" })
+        UI.LahanStatus = LTab:Paragraph({ Title = "Status Dirt Farm", Desc = "-" })
     end)
 
-    local lCtl = box(LTab, "Bangun Lahan", true)
-    local lShape = box(LTab, "Bentuk lahan", true)
+    local lCtl = box(LTab, "Bangun Dirt Farm", true)
+    local lShape = box(LTab, "Bentuk Dirt Farm", true)
 
     safe(function()
         UI.BuildToggle = lCtl:Toggle({
-            Title = "Bangun Lahan",
-            Desc = "Gali dulu dari permukaan sampai bawah, lalu pasang baris naik sampai atas (baris jadi jembatan). Block habis: produksi 1 baris",
+            Title = "Bangun Dirt Farm",
+            Desc = "Gali per baris tanpa kembali ke awal, pukulan lebih rapat, lava terjangkau didahulukan. Block kurang: produksi 1 baris",
             Value = false,
             Callback = function(on)
                 if on then Build.start() elseif Build.Running then Build.stop() end
@@ -11763,7 +11942,7 @@ do (function()
 
     safe(function()
         UI.BuildBlockDropdown = lCtl:Dropdown({
-            Title = "Block lahan",
+            Title = "Block Dirt Farm",
             Desc = "Block padat dari inventori",
             Values = { "(memuat...)" },
             Callback = function(opt)
@@ -11815,12 +11994,12 @@ do (function()
             Callback = function()
                 local x, y = Auto.here()
                 if not x then
-                    notify("Lahan", "Kamu belum masuk world", 3)
+                    notify("Dirt Farm", "Kamu belum masuk world", 3)
                     return
                 end
                 -- block yang dipijak = block pertama baris atas, kolom tangga kiri di sebelah kirinya
                 Land.X0, Land.Y0 = math.max(0, x - 1), y + 1
-                notify("Lahan", ("X awal %d, Y baris atas %d"):format(Land.X0, Land.Y0), 4)
+                notify("Dirt Farm", ("X awal %d, Y baris atas %d"):format(Land.X0, Land.Y0), 4)
             end,
         })
     end)
@@ -11840,16 +12019,16 @@ do (function()
             Callback = function()
                 local x, y = Auto.here()
                 if not x then
-                    notify("Lahan", "Kamu belum masuk world", 3)
+                    notify("Dirt Farm", "Kamu belum masuk world", 3)
                     return
                 end
                 if Build.BreakX == x and Build.BreakY == y then
                     Build.BreakX, Build.BreakY = -1, -1
-                    notify("Lahan", "Posisi break produksi: otomatis", 3)
+                    notify("Dirt Farm", "Posisi break produksi: otomatis", 3)
                 else
                     Build.BreakX, Build.BreakY = x, y
                     if next(Build.Tiles) == nil then Build.Tiles["1,0"] = true end
-                    notify("Lahan", ("Posisi break produksi (%d,%d)"):format(x, y), 3)
+                    notify("Dirt Farm", ("Posisi break produksi (%d,%d)"):format(x, y), 3)
                 end
             end,
         })
@@ -11858,7 +12037,7 @@ do (function()
     safe(function()
         lCtl:Button({
             Title = "Pilih tile break produksi (Grid)",
-            Desc = "Grid terbuka dalam mode Lahan (terpisah dari Auto Farm & Pabrik)",
+            Desc = "Grid terbuka dalam mode Dirt Farm (terpisah dari Auto Farm & Pabrik)",
             Callback = function()
                 if UI.setGridMode then UI.setGridMode("lahan") end
                 if UI.GridGui then UI.GridGui.Enabled = true end
@@ -11895,9 +12074,11 @@ do (function()
                     "Seed block: " .. (seed and (itemName(seed) .. " x" .. invCount(seed)) or "-"),
                     ("Produksi : panen %d | tanam %d"):format(Build.Harvested, Build.Planted),
                     "Break    : " .. ((Build.BreakX >= 0 and next(Build.Tiles) ~= nil)
-                        and ("(" .. Build.BreakX .. "," .. Build.BreakY .. ") | grid lahan")
+                        and ("(" .. Build.BreakX .. "," .. Build.BreakY .. ") | grid Dirt Farm")
                         or "otomatis (kanan karakter, dekat ujung baris)"),
                     "Aksi     : " .. Build.Status,
+                    ("Lava     : prioritas otomatis | dibersihkan %d | jeda pukul %d ms"):format(
+                        Build.LavaCleared or 0, Build.PunchMs or 200),
                 }, "\n")
             else
                 txt = "Data world belum ketemu"
@@ -11908,7 +12089,7 @@ do (function()
             end
             -- tombol START di Grid (mode lahan)
             if UI.GridMode == "lahan" and UI.GridStart then
-                UI.GridStart.Text = I18N.T(Build.Running and "STOP LAHAN" or "START LAHAN")
+                UI.GridStart.Text = I18N.T(Build.Running and "STOP DIRT FARM" or "START DIRT FARM")
                 UI.GridStart.BackgroundColor3 = Build.Running and Color3.fromRGB(200, 60, 60) or Color3.fromRGB(46, 160, 90)
             end
             task.wait(1)
@@ -12172,7 +12353,7 @@ do (function()
     safe(function()
         pCtl:Toggle({
             Title = "Tanam di seluruh world",
-            Desc = "Mati = hanya di lahan (tab Lahan)",
+            Desc = "Mati = hanya di Dirt Farm (tab Dirt Farm)",
             Value = Pabrik.WholeWorld,
             Callback = function(on) Pabrik.WholeWorld = on end,
         })
@@ -13082,7 +13263,7 @@ do (function()
         { "Full", "Inventori penuh" },
         { "Bonus", "Quest diklaim / redeem berhasil" },
         { "Rejoin", "Terlempar / disconnect / masuk lagi" },
-        { "Pabrik", "Pabrik drop seed / lahan selesai / berhenti" },
+        { "Pabrik", "Pabrik drop seed / Dirt Farm selesai / berhenti" },
     }) do
         safe(function()
             dWhat:Toggle({

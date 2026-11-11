@@ -1,4 +1,4 @@
--- Zekio | Tembus Batu TEST r4 | standalone
+-- Zekio | Batu TEST r4.1 DIAG | standalone
 local G = (getgenv and getgenv()) or _G
 if G.__ZekioRockOnly and G.__ZekioRockOnly.Cleanup then pcall(G.__ZekioRockOnly.Cleanup) end
 local Session = { Connections = {} }
@@ -65,25 +65,25 @@ do
     Session.Gui = gui
     local panel = Instance.new("Frame")
     panel.AnchorPoint, panel.Position = Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 105)
-    panel.Size = UDim2.new(0.9, 0, 0, 202)
+    panel.Size = UDim2.new(0.9, 0, 0, 244)
     panel.BackgroundColor3, panel.BorderSizePixel = Color3.fromRGB(23, 25, 33), 0
     panel.Parent = gui
     Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
     local constraint = Instance.new("UISizeConstraint")
-    constraint.MaxSize, constraint.Parent = Vector2.new(420, 202), panel
+    constraint.MaxSize, constraint.Parent = Vector2.new(420, 244), panel
     local title = Instance.new("TextLabel")
     title.Position, title.Size = UDim2.fromOffset(14, 10), UDim2.new(1, -60, 0, 25)
     title.BackgroundTransparency, title.TextXAlignment = 1, Enum.TextXAlignment.Left
-    title.Text, title.Font, title.TextSize = "Zekio | Tembus Batu TEST r4", Enum.Font.GothamBold, 17
+    title.Text, title.Font, title.TextSize = "Zekio | Batu TEST r4.1 DIAG", Enum.Font.GothamBold, 17
     title.TextColor3, title.Parent = Color3.fromRGB(245, 245, 250), panel
     local close = Instance.new("TextButton")
     close.Position, close.Size = UDim2.new(1, -42, 0, 9), UDim2.fromOffset(30, 28)
     close.Text, close.TextSize, close.BackgroundTransparency = "X", 17, 1
     close.TextColor3, close.Parent = Color3.fromRGB(220, 220, 230), panel
     local status = Instance.new("TextLabel")
-    status.Position, status.Size = UDim2.fromOffset(14, 44), UDim2.new(1, -28, 0, 96)
+    status.Position, status.Size = UDim2.fromOffset(14, 44), UDim2.new(1, -28, 0, 144)
     status.BackgroundTransparency, status.TextWrapped = 1, true
-    status.Font, status.TextSize, status.TextColor3 = Enum.Font.Gotham, 12, Color3.fromRGB(200, 205, 220)
+    status.Font, status.TextSize, status.TextColor3 = Enum.Font.Gotham, 11, Color3.fromRGB(200, 205, 220)
     status.TextXAlignment, status.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
     status.Text, status.Parent = Rock.Status, panel
     UI.Status = status
@@ -281,14 +281,32 @@ function AutoInput.key(first, second)
     if key == "keyjump" or key == "jump" or key == "space" or key == "up" or key == "w" then return "jump" end
     if key == "keydown" or key == "down" or key == "s" then return "down" end
 end
+function AutoInput.resetTelemetry()
+    AutoInput.KeyReads, AutoInput.TrueReturns = {}, {}
+    AutoInput.OtherKeys, AutoInput.OtherSeen = {}, {}
+end
+
 local function isDownWrapper(...)
     local first, second = ...
     local key = AutoInput.key(first, second)
     if key then
         AutoInput.Reads = (AutoInput.Reads or 0) + 1
         AutoInput.LastRead = os.clock()
-        if AutoInput.active then return AutoInput[key] == true end
-
+        if AutoInput.active then
+            if not AutoInput.KeyReads then AutoInput.resetTelemetry() end
+            AutoInput.KeyReads[key] = (AutoInput.KeyReads[key] or 0) + 1
+            local pressed = AutoInput[key] == true
+            if pressed then AutoInput.TrueReturns[key] = (AutoInput.TrueReturns[key] or 0) + 1 end
+            return pressed
+        end
+    elseif AutoInput.active then
+        if not AutoInput.OtherKeys then AutoInput.resetTelemetry() end
+        local raw = second ~= nil and second or first
+        if type(raw) ~= "string" then raw = AutoInput.member(raw, "Name") end
+        if type(raw) == "string" and not AutoInput.OtherSeen[raw] and #AutoInput.OtherKeys < 4 then
+            AutoInput.OtherSeen[raw] = true
+            AutoInput.OtherKeys[#AutoInput.OtherKeys + 1] = raw:sub(1, 24)
+        end
     end
     if OrigIsDown then return OrigIsDown(...) end
     return false
@@ -504,6 +522,7 @@ function AutoInput.bindMenu(quick)
     AutoInput.Function, AutoInput.Source, AutoInput.Error = fn, source .. "." .. key, nil
     AutoInput.World = Refs.World
     AutoInput.Reads = 0
+    AutoInput.resetTelemetry()
     Refs.Input, Refs.InputSource = menu, AutoInput.Source
     return true
 end
@@ -607,9 +626,11 @@ function Rock.enablePhase()
     if not ok then return false, "Atribut Ghost pemain belum dapat dibaca: " .. tostring(previous) end
     Rock.GhostPrevious, Rock.GhostSaved = previous, true
     Rock.RestoreError = nil
+    if Rock.Diagnostic then Rock.Diagnostic.GhostBefore = tostring(previous) end
     local enabled, err = pcall(function() LocalPlayer:SetAttribute("Ghost", true) end)
     if not enabled then return false, "Atribut Ghost pemain gagal diaktifkan: " .. tostring(err) end
     local verified, value = pcall(readPlayerGhost)
+    if Rock.Diagnostic then Rock.Diagnostic.GhostDuring = verified and tostring(value) or "tidak terbaca" end
     if not verified or value ~= true then
         return false, "Atribut Ghost tidak tetap aktif setelah dipasang"
     end
@@ -618,6 +639,7 @@ end
 
 function Rock.checkPhase()
     local ok, value = pcall(readPlayerGhost)
+    if Rock.Diagnostic then Rock.Diagnostic.GhostDuring = ok and tostring(value) or "tidak terbaca" end
     if not ok then return false, "Atribut Ghost tidak dapat dibaca saat bergerak" end
     if value ~= true then return false, "Atribut Ghost dinonaktifkan saat bergerak; percobaan dihentikan" end
     return true
@@ -698,6 +720,20 @@ local function axisInput(delta, velocity, tolerance, dt)
     return dir
 end
 
+function Rock.captureDiagnostic()
+    local d = Rock.Diagnostic
+    if not d then return end
+    d.InputSource = AutoInput.Source or d.InputSource or "belum terhubung"
+    d.KeyReads, d.TrueReturns = {}, {}
+    for _, key in ipairs({ "left", "right", "jump", "down" }) do
+        d.KeyReads[key] = (AutoInput.KeyReads and AutoInput.KeyReads[key]) or 0
+        d.TrueReturns[key] = (AutoInput.TrueReturns and AutoInput.TrueReturns[key]) or 0
+    end
+    d.OtherKeys = table.concat(AutoInput.OtherKeys or {}, ", ")
+    d.InputCaptured = true
+    Session.LastDiagnostic = d
+end
+
 function Rock.report(message)
     local d = Rock.Diagnostic
     if not d then return message end
@@ -705,9 +741,19 @@ function Rock.report(message)
     local current = s and ("(%.2f,%.2f)"):format(s.x, s.y) or "tidak terbaca"
     local ok, value = pcall(readPlayerGhost)
     local attribute = ok and tostring(value) or "tidak terbaca"
-    return tostring(message) .. ("\nAwal (%.1f,%.1f) > tujuan (%d,%d)"):format(d.x, d.y, d.tx, d.ty)
+    local reads = d.InputCaptured and d.KeyReads or AutoInput.KeyReads or {}
+    local returns = d.InputCaptured and d.TrueReturns or AutoInput.TrueReturns or {}
+    local function count(key) return tostring(reads[key] or 0) .. "/" .. tostring(returns[key] or 0) end
+    local other = d.InputCaptured and d.OtherKeys or table.concat(AutoInput.OtherKeys or {}, ", ")
+    return tostring(message) .. ("\nAwal (%.1f,%.1f) > tujuan (%d,%d) | maju maks %.2f"):format(d.x, d.y, d.tx, d.ty, d.Furthest or 0)
         .. "\nPosisi " .. current .. " | " .. tostring(d.stage or "-")
-        .. "\nGhost pemain: " .. attribute .. " | world: " .. tostring(Refs.World and Refs.World.ghost)
+        .. "\nInput: " .. tostring(d.InputSource or AutoInput.Source or "belum terhubung"):sub(1, 50)
+        .. "\nBaca/aktif: Ki " .. count("left") .. " Ka " .. count("right")
+        .. " J " .. count("jump") .. " D " .. count("down")
+        .. "\nGhost gerak: " .. tostring(d.GhostDuring or "belum aktif")
+        .. (d.InputCaptured and " | sesudah: " or " | kini: ") .. attribute
+        .. " | world: " .. tostring(Refs.World and Refs.World.ghost)
+        .. (other ~= "" and ("\nTombol lain: " .. other) or "")
 end
 
 function Rock.perform(dir, cancel)
@@ -716,7 +762,7 @@ function Rock.perform(dir, cancel)
     local target, edge = Rock.phaseTarget(s, dir)
     if not target then return false, edge end
     if cancel() then return false, "Gerakan dibatalkan" end
-    local d = { x = s.x, y = s.y, tx = target.x, ty = target.y, stage = "melewati batu" }
+    local d = { x = s.x, y = s.y, tx = target.x, ty = target.y, stage = "mencoba bergerak" }
     Rock.Diagnostic = d
     local enabled, previousGhost = Rock.enablePhase()
     if not enabled then return false, previousGhost end
@@ -745,6 +791,7 @@ function Rock.perform(dir, cancel)
             return false, "Posisi dikembalikan game saat mencoba tembus"
         end
         furthest = math.max(furthest, projection)
+        d.Furthest = furthest
         local dx, dy = cx - cur.x, hoverY - cur.y
         local distance = abs(dx) + abs(dy)
         if distance < bestDistance - 0.04 then bestDistance, progressAt = distance, os.clock() end
@@ -763,11 +810,22 @@ function Rock.perform(dir, cancel)
             AutoInput.jump, AutoInput.down = vertical < 0, vertical > 0
         end
         if (not nearAt and os.clock() - progressAt > 2.5) or (nearAt and os.clock() - nearAt > 5) then
-            if (AutoInput.Reads or 0) == 0 then return false, "Kontrol terpasang tetapi belum dibaca game" end
+            if (AutoInput.Reads or 0) == 0 then
+                if AutoInput.OtherKeys and #AutoInput.OtherKeys > 0 then
+                    return false, "Pembaca dipanggil, tetapi nama tombol belum dikenali"
+                end
+                return false, "Kontrol terpasang tetapi belum dibaca game"
+            end
+            if not nearAt then
+                local key = dir < 0 and "left" or "right"
+                if ((AutoInput.TrueReturns and AutoInput.TrueReturns[key]) or 0) == 0 then
+                    return false, "Bacaan kontrol ada, tetapi perintah arah belum dikonfirmasi"
+                end
+            end
             return false, nearAt and "Belum bisa berhenti di atas pijakan; gerakan dihentikan"
-                or "Atribut Ghost aktif tetapi karakter belum melewati batu"
+                or "Input arah terbaca, tetapi posisi belum maju melewati batu"
         end
-        d.stage = nearAt and "mengerem sebelum mendarat" or "melewati batu"
+        d.stage = nearAt and "mengerem sebelum mendarat" or "mencoba bergerak"
         if os.clock() - lastStatus > 0.25 then
             Rock.status(Rock.report(dir > 0 and "Bergerak ke kanan..." or "Bergerak ke kiri..."))
             lastStatus = os.clock()
@@ -855,6 +913,7 @@ function Rock.start(dir)
             return Rock.perform(dir, cancel)
         end)
         if Rock.Token ~= token then return end
+        Rock.captureDiagnostic()
         Rock.Busy, Rock.Running, AutoInput.active = false, false, false
         releaseInput()
         Rock.restorePhase()
@@ -887,4 +946,4 @@ listen(UI.Left.MouseButton1Click, function() Rock.start(-1) end)
 listen(UI.Right.MouseButton1Click, function() Rock.start(1) end)
 listen(UI.Cancel.MouseButton1Click, Rock.cancel)
 listen(UI.Close.MouseButton1Click, Session.Cleanup)
-Rock.status("TEST r4: atribut Ghost pemain. Pilih arah lalu tunggu pemeriksaan posisi.")
+Rock.status("r4.1 DIAG: pilih kiri/kanan. Baca/aktif = jumlah tombol dibaca / aktif. Ki=kiri, Ka=kanan, J=lompat, D=turun.")

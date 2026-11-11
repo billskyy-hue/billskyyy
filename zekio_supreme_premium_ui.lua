@@ -1,4 +1,4 @@
--- Zekio Supreme Premium | UI ONLY P1
+-- Zekio Supreme Premium | UI ONLY P2
 -- Self-contained interface. Every feature action is an unconnected UI stub.
 -- No gameplay discovery, remotes, movement, item actions or key verification.
 local G = (getgenv and getgenv()) or _G
@@ -11,7 +11,7 @@ local player = Players.LocalPlayer
 assert(player, "Jalankan UI dari client Roblox setelah masuk game.")
 local playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 15)
 assert(playerGui, "PlayerGui belum tersedia.")
-local UI = { Page = "overview", Group = "farming", Theme = "Gelap", Styles = setmetatable({}, { __mode = "k" }) }
+local UI = { Page = "overview", Group = "farming", Theme = "Gelap", Scale = 1, Width = 720, Height = 460, Styles = setmetatable({}, { __mode = "k" }) }
 local function alive() return not Session.Closed and G.__ZekioPremiumUI == Session end
 local V = Session.Values
 local COLORS = {
@@ -114,10 +114,10 @@ local PAGES = {
     chat={title="Auto Chat",subtitle="Susun pesan dan atur interval pengulangan.",action="Pratinjau pesan",groups={group("Pesan otomatis",{f("chat.message","Isi pesan","Tulis pesan…"),n("chat.interval","Interval pesan (detik)",60,1,3600),t("chat.enabled","Auto Chat","Tombol ini hanya mengubah tampilan UI.")})}},
     bonus={title="Bonus",subtitle="Tampilan pengambilan bonus dan kode redeem.",action="Coba kode bonus",groups={group("Kode bonus",{f("bonus.code","Kode redeem","MASUKKAN KODE"),t("bonus.auto","Auto Bonus","Atur preferensi bonus dalam pratinjau.")})}},
     security={title="Keamanan",subtitle="Preferensi perlindungan sesi.",groups={group("Perlindungan",{info("World Lock, lock lain, dan spawn dilindungi."),t("security.worldChange","Stop saat world berubah","Hentikan rutinitas dari world sebelumnya.",true),t("security.error","Jeda saat aksi gagal","Tampilkan alasan sebelum melanjutkan.",true),t("security.storage","Jeda saat kirim seed","Lanjutkan setelah kembali ke world kerja.",true)})}},
-    settings={title="Setelan",subtitle="Sesuaikan tampilan Zekio Supreme Premium.",special="settings",groups={group("Tampilan",{s("ui.theme","Tema",{"Gelap","Terang"}),t("ui.notifications","Notifikasi UI","Tampilkan pesan dari tombol pratinjau.",true),info("Preferensi di pratinjau ini hanya tersimpan selama UI terbuka.")})}},
+    settings={title="Setelan",subtitle="Sesuaikan tampilan Zekio Supreme Premium.",special="settings",groups={group("Tampilan",{s("ui.theme","Tema",{"Gelap","Terang"}),r("ui.scale","Ukuran UI",85,70,100,5,"%"),t("ui.notifications","Notifikasi UI","Tampilkan pesan dari tombol pratinjau.",true),info("Preferensi di pratinjau ini hanya tersimpan selama UI terbuka.")})}},
     stats={title="Statistik",subtitle="Ringkasan aktivitas setelah fitur dihubungkan.",special="stats"},
     key={title="Akun & Key",subtitle="Panel akses Zekio Supreme Premium.",special="key",action="Verifikasi key",groups={group("License key",{f("key.value","Key premium","Masukkan key premium"),info("Validasi key belum dihubungkan. Tidak ada key yang dikirim atau diverifikasi.")})}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P1.",groups={group("12 November 2026",{info("19 menu dengan tema hitam–ungu dan pilihan tema terang."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P2.",groups={group("12 November 2026",{info("19 menu dengan tema hitam–ungu dan pilihan tema terang."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
@@ -127,7 +127,7 @@ local GROUPS={
     {id="system",title="Sistem",mark="S",pages={"settings","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM UI P1"
+Session.Build="PREMIUM UI P2"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -138,7 +138,9 @@ if type(gethui)=="function" then local ok,result=pcall(gethui);if ok and result 
 local parentOK=pcall(function() gui.Parent=parent end);if not parentOK then gui.Parent=playerGui end
 Session.Gui=gui
 local root=frame(gui,UDim2.fromScale(1,1),nil,{Name="Viewport"})
-local window=frame(root,UDim2.fromOffset(760,510),"bg",{Name="PremiumWindow",Active=true,Position=UDim2.fromOffset(20,20)})
+local host=frame(root,UDim2.fromOffset(720,460),nil,{Name="WindowHost",Position=UDim2.fromOffset(20,20)})
+local window=frame(host,UDim2.fromOffset(720,460),"bg",{Name="PremiumWindow",Active=true,Position=UDim2.fromOffset(0,0)})
+local windowScale=make("UIScale",{Name="ResponsiveScale",Scale=1},window)
 round(window,16);outline(window)
 local header=frame(window,UDim2.new(1,0,0,68),nil)
 local headerLine=frame(header,UDim2.new(1,0,0,1),"line",{Position=UDim2.new(0,0,1,-1)})
@@ -148,7 +150,7 @@ label(logo,"Z",25,"accent",{Font=Enum.Font.GothamBold,Position=UDim2.fromOffset(
 label(logo,"S",25,"accent",{Font=Enum.Font.GothamBold,Position=UDim2.fromOffset(14,5),Size=UDim2.fromOffset(27,36)})
 local title=label(header,"Zekio Supreme",17,"text",{Font=Enum.Font.GothamBold,Position=UDim2.fromOffset(65,13),Size=UDim2.new(1,-170,0,23)})
 local edition=label(header,"PREMIUM  •  UI PREVIEW",11,"accent",{Position=UDim2.fromOffset(65,38),Size=UDim2.new(1,-170,0,16)})
-local dragArea=make("TextButton",{Text="",BackgroundTransparency=1,AutoButtonColor=false,Position=UDim2.fromOffset(54,0),Size=UDim2.new(1,-144,1,0)},header)
+local dragArea=make("TextButton",{Name="WindowDragHandle",Text="",BackgroundTransparency=1,AutoButtonColor=false,Position=UDim2.fromOffset(54,0),Size=UDim2.new(1,-144,1,0)},header)
 local menuButton=button(header,"≡",UDim2.fromOffset(36,40),function() UI.drawer(not UI.Drawer) end,false)
 menuButton.Position=UDim2.fromOffset(8,14);menuButton.Visible=false
 local minimize=button(header,"−",UDim2.fromOffset(34,36),function() UI.closePopup();window.Visible=false;UI.Bubble.Visible=true end,false)
@@ -156,15 +158,16 @@ minimize.Position=UDim2.new(1,-84,0,16)
 local close=button(header,"×",UDim2.fromOffset(34,36),function() Session.Cleanup() end,false)
 close.Position=UDim2.new(1,-44,0,16)
 local body=frame(window,UDim2.new(1,0,1,-98),nil,{Position=UDim2.fromOffset(0,68)})
-local side=make("ScrollingFrame",{Name="Navigation",BackgroundTransparency=0,BorderSizePixel=0,Size=UDim2.new(0,170,1,0),ScrollBarThickness=2,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollingDirection=Enum.ScrollingDirection.Y},body)
-UI.tint(side,"BackgroundColor3","side");UI.tint(side,"ScrollBarImageColor3","line");padding(side,10)
-local nav=frame(side,UDim2.new(1,0,0,0),nil,{AutomaticSize=Enum.AutomaticSize.Y});stack(nav,4)
+local side=make("ScrollingFrame",{Name="Navigation",BackgroundTransparency=0,BorderSizePixel=0,Size=UDim2.new(0,170,1,0),ScrollBarThickness=4,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.None,ScrollingDirection=Enum.ScrollingDirection.Y,ClipsDescendants=true},body)
+UI.tint(side,"BackgroundColor3","side");UI.tint(side,"ScrollBarImageColor3","accent")
+local nav=frame(side,UDim2.fromOffset(146,0),nil,{Position=UDim2.fromOffset(10,10)})
+local navLayout=stack(nav,4)
 local sideLine=frame(body,UDim2.new(0,1,1,0),"line",{Position=UDim2.fromOffset(170,0)})
-local content=make("ScrollingFrame",{Name="PageContent",BackgroundTransparency=1,BorderSizePixel=0,Position=UDim2.fromOffset(171,0),Size=UDim2.new(1,-171,1,0),ScrollBarThickness=3,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ScrollingDirection=Enum.ScrollingDirection.Y},body)
-UI.tint(content,"ScrollBarImageColor3","line");padding(content,20)
+local content=make("ScrollingFrame",{Name="PageContent",BackgroundTransparency=1,BorderSizePixel=0,Position=UDim2.fromOffset(171,0),Size=UDim2.new(1,-171,1,0),ScrollBarThickness=4,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.None,ScrollingDirection=Enum.ScrollingDirection.Y,ClipsDescendants=true},body)
+UI.tint(content,"ScrollBarImageColor3","accent")
 local footer=frame(window,UDim2.new(1,0,0,30),"side",{Position=UDim2.new(0,0,1,-30)})
 local footerText=label(footer,"Mode pratinjau • aksi game belum dihubungkan",11,"muted",{Position=UDim2.fromOffset(13,0),Size=UDim2.new(1,-55,1,0)})
-label(footer,"P1",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
+label(footer,"P2",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
 local shade=button(body,"",UDim2.fromScale(1,1),function() UI.drawer(false) end,false)
 shade.BackgroundTransparency=.35;shade.ZIndex=29;shade.Visible=false
 local bubble=button(root,"ZS",UDim2.fromOffset(54,54),function() window.Visible=true;UI.Bubble.Visible=false end,true)
@@ -201,34 +204,84 @@ local function disconnectPage()
 end
 function UI.dropdown(anchor, choices, selected, callback)
     UI.closePopup();popupShade.Visible=true
-    local w=math.min(math.max(anchor.AbsoluteSize.X,170),window.AbsoluteSize.X-24)
-    local h=math.min(#choices*38+12,240)
-    local x=math.clamp(anchor.AbsolutePosition.X-window.AbsolutePosition.X,12,math.max(12,window.AbsoluteSize.X-w-12))
-    local y=anchor.AbsolutePosition.Y-window.AbsolutePosition.Y+anchor.AbsoluteSize.Y+4
-    if y+h>window.AbsoluteSize.Y-34 then y=math.max(72,anchor.AbsolutePosition.Y-window.AbsolutePosition.Y-h-4) end
+    local factor=math.max(.01,UI.Scale)
+    local w=math.min(math.max(anchor.AbsoluteSize.X/factor,170),UI.Width-24)
+    local h=math.min(#choices*38+12,240,UI.Height-110)
+    local anchorX=(anchor.AbsolutePosition.X-window.AbsolutePosition.X)/factor
+    local anchorY=(anchor.AbsolutePosition.Y-window.AbsolutePosition.Y)/factor
+    local x=math.clamp(anchorX,12,math.max(12,UI.Width-w-12))
+    local y=anchorY+anchor.AbsoluteSize.Y/factor+4
+    if y+h>UI.Height-36 then y=math.max(72,anchorY-h-4) end
+    y=math.clamp(y,8,math.max(8,UI.Height-h-36))
     popup=frame(window,UDim2.fromOffset(w,h),"card",{Position=UDim2.fromOffset(x,y),ZIndex=81,Name="DropdownPopup"})
     round(popup,10);outline(popup)
-    local scroll=make("ScrollingFrame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=82},popup)
+    local scroll=make("ScrollingFrame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,CanvasSize=UDim2.fromOffset(0,#choices*38+12),AutomaticCanvasSize=Enum.AutomaticSize.None,ScrollingDirection=Enum.ScrollingDirection.Y,ClipsDescendants=true,ZIndex=82},popup)
     padding(scroll,6);stack(scroll,3)
     for _,entry in ipairs(choices) do
         local choice=entry
-        local b=button(scroll,choice,UDim2.new(1,0,0,35),function() UI.closePopup();callback(choice) end,choice==selected,true)
+        local b=button(scroll,choice,UDim2.fromOffset(w-16,35),function() UI.closePopup();callback(choice) end,choice==selected,true)
         b.ZIndex=83;b.TextXAlignment=Enum.TextXAlignment.Left;padding(b,10)
     end
 end
+-- Measure rendered child heights, then convert once to unscaled UI units.
+-- Scroll canvases keep X=0; no descendant is allowed to grow the canvas width.
+function UI.fitStack(container, layout, gap, callback, pageScope)
+    local busy=false
+    local watched=setmetatable({}, {__mode="k"})
+    local resize
+    local function watch(child)
+        if child:IsA("GuiObject") and not watched[child] then
+            watched[child]=true
+            connect(child:GetPropertyChangedSignal("AbsoluteSize"),function() resize() end,pageScope)
+            connect(child:GetPropertyChangedSignal("Visible"),function() resize() end,pageScope)
+        end
+    end
+    resize=function()
+        if busy or not alive() or not container.Parent then return end
+        busy=true
+        local total,count=0,0
+        local _=layout.AbsoluteContentSize
+        for _,child in ipairs(container:GetChildren()) do
+            watch(child)
+            if child:IsA("GuiObject") and child.Visible then
+                total=total+child.AbsoluteSize.Y/math.max(.01,UI.Scale)
+                count=count+1
+            end
+        end
+        callback(math.ceil(total+gap*math.max(0,count-1)))
+        busy=false
+    end
+    connect(container.ChildAdded,function(child) watch(child);resize() end,pageScope)
+    connect(container.ChildRemoved,resize,pageScope)
+    connect(layout:GetPropertyChangedSignal("AbsoluteContentSize"),resize,pageScope)
+    connect(windowScale:GetPropertyChangedSignal("Scale"),resize,pageScope)
+    resize()
+    return resize
+end
+UI.fitStack(nav,navLayout,4,function(height)
+    if nav.Size.Y.Offset~=height then nav.Size=UDim2.fromOffset(146,height) end
+    side.CanvasSize=UDim2.fromOffset(0,height+20)
+end,false)
+
 local function caption(parent, text, height)
     return label(parent,text,12,"muted",{Size=UDim2.new(1,0,0,height or 30),TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
 end
 local function card(parent,titleText)
-    local cardFrame=frame(parent,UDim2.new(1,0,0,0),"card",{AutomaticSize=Enum.AutomaticSize.Y})
-    round(cardFrame,12);outline(cardFrame);padding(cardFrame,14);stack(cardFrame,12)
-    label(cardFrame,titleText,13,"text",{Size=UDim2.new(1,0,0,22),Font=Enum.Font.GothamBold})
-    return cardFrame
+    local cardFrame=frame(parent,UDim2.new(1,0,0,50),"card",{Name="ContentCard"})
+    round(cardFrame,12);outline(cardFrame)
+    local inner=frame(cardFrame,UDim2.new(1,-28,0,22),nil,{Name="CardContent",Position=UDim2.fromOffset(14,14)})
+    local layout=stack(inner,12)
+    label(inner,titleText,13,"text",{Size=UDim2.new(1,0,0,22),Font=Enum.Font.GothamBold})
+    UI.fitStack(inner,layout,12,function(height)
+        if inner.Size.Y.Offset~=height then inner.Size=UDim2.new(1,-28,0,height) end
+        if cardFrame.Size.Y.Offset~=height+28 then cardFrame.Size=UDim2.new(1,0,0,height+28) end
+    end,true)
+    return inner
 end
 local function displayRow(parent,left,right)
-    local row=frame(parent,UDim2.new(1,0,0,32),nil)
-    label(row,left,12,"muted",{Size=UDim2.new(.63,0,1,0)})
-    label(row,right,12,"text",{Position=UDim2.new(.63,0,0,0),Size=UDim2.new(.37,0,1,0),TextXAlignment=Enum.TextXAlignment.Right})
+    local row=frame(parent,UDim2.new(1,0,0,40),nil)
+    label(row,left,12,"muted",{Size=UDim2.new(.45,-6,1,0),TextWrapped=true})
+    label(row,right,12,"text",{Position=UDim2.new(.45,6,0,0),Size=UDim2.new(.55,-6,1,0),TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Right})
 end
 local function field(parent,row,width)
     local wrapper=frame(parent,UDim2.new(width or 1,width and -6 or 0,0,68),nil)
@@ -261,8 +314,16 @@ local function field(parent,row,width)
 end
 function UI.row(parent,row)
     if row.kind=="info" then
-        local wrap=frame(parent,UDim2.new(1,0,0,0),"raised",{AutomaticSize=Enum.AutomaticSize.Y});round(wrap,8);padding(wrap,10)
-        label(wrap,row.title,11,"muted",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,TextWrapped=true})
+        local wrap=frame(parent,UDim2.new(1,0,0,40),"raised");round(wrap,8)
+        local text=label(wrap,row.title,11,"muted",{Position=UDim2.fromOffset(10,10),Size=UDim2.new(1,-20,0,0),AutomaticSize=Enum.AutomaticSize.Y,TextWrapped=true})
+        local function fitText()
+            if not alive() or not wrap.Parent then return end
+            local height=math.max(40,math.ceil(text.AbsoluteSize.Y/math.max(.01,UI.Scale))+20)
+            if wrap.Size.Y.Offset~=height then wrap.Size=UDim2.new(1,0,0,height) end
+        end
+        connect(text:GetPropertyChangedSignal("AbsoluteSize"),fitText,true)
+        connect(windowScale:GetPropertyChangedSignal("Scale"),fitText,true)
+        fitText()
     elseif row.kind=="pair" then
         local wrap=frame(parent,UDim2.new(1,0,0,68),nil)
         field(wrap,row.items[1],.5)
@@ -270,9 +331,9 @@ function UI.row(parent,row)
     elseif row.kind=="input" or row.kind=="select" then field(parent,row)
     elseif row.kind=="toggle" then
         local current=value(row.key,row.default)
-        local wrap=frame(parent,UDim2.new(1,0,0,66),nil)
-        label(wrap,row.title,12,"text",{Font=Enum.Font.GothamBold,Size=UDim2.new(1,-60,0,25),TextWrapped=true})
-        label(wrap,row.description or "",11,"muted",{Position=UDim2.fromOffset(0,28),Size=UDim2.new(1,-60,0,34),TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
+        local wrap=frame(parent,UDim2.new(1,0,0,78),nil)
+        label(wrap,row.title,12,"text",{Font=Enum.Font.GothamBold,Size=UDim2.new(1,-60,0,30),TextWrapped=true})
+        label(wrap,row.description or "",11,"muted",{Position=UDim2.fromOffset(0,34),Size=UDim2.new(1,-60,0,40),TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
         local hit=make("TextButton",{Text="",BackgroundTransparency=1,AutoButtonColor=false,Size=UDim2.fromScale(1,1)},wrap)
         local switch=frame(wrap,UDim2.fromOffset(38,22),current and "accent" or "line",{Position=UDim2.new(1,-42,0,20)});round(switch,20)
         local knob=frame(switch,UDim2.fromOffset(16,16),current and "onAccent" or "card",{Position=UDim2.fromOffset(current and 19 or 3,3)});round(knob,12)
@@ -301,6 +362,7 @@ function UI.row(parent,row)
             V[row.key]=newValue;number.Text=tostring(newValue)..row.unit
             local p=(newValue-row.min)/(row.max-row.min)
             fill.Size=UDim2.new(p,0,1,0);knob.Position=UDim2.new(p,0,.5,0)
+            if row.key=="ui.scale" then UI.layout() end
         end
         Session.Controls[row.key]=hit
         connect(hit.InputBegan,function(input)
@@ -333,7 +395,7 @@ function UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"UI ONLY  •  P1",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"UI ONLY  •  P2",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 local function special(parent,name)
     if name=="overview" then
@@ -364,11 +426,17 @@ function UI.show(id,groupId)
     if groupId then UI.Group=groupId else for _,g in ipairs(GROUPS) do if table.find(g.pages,id) then UI.Group=g.id end end end
     disconnectPage()
     if pageRoot then pageRoot:Destroy() end
-    pageRoot=frame(content,UDim2.new(1,0,0,0),nil,{AutomaticSize=Enum.AutomaticSize.Y,Name="Page_"..id});stack(pageRoot,14)
+    pageRoot=frame(content,UDim2.fromOffset(UI.PageWidth or 509,0),nil,{Position=UDim2.fromOffset(16,16),Name="Page_"..id})
+    local pageLayout=stack(pageRoot,14)
+    UI.fitStack(pageRoot,pageLayout,14,function(height)
+        local width=UI.PageWidth or 509
+        if pageRoot.Size.Y.Offset~=height or pageRoot.Size.X.Offset~=width then pageRoot.Size=UDim2.fromOffset(width,height) end
+        content.CanvasSize=UDim2.fromOffset(0,height+32)
+    end,true)
     local page=PAGES[id]
-    local heading=frame(pageRoot,UDim2.new(1,0,0,66),nil)
+    local heading=frame(pageRoot,UDim2.new(1,0,0,66),nil,{AutomaticSize=Enum.AutomaticSize.Y})
     label(heading,page.title,21,"text",{Size=UDim2.new(1,0,0,28),Font=Enum.Font.GothamBold})
-    label(heading,page.subtitle,12,"muted",{Position=UDim2.fromOffset(0,35),Size=UDim2.new(1,0,0,31),TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
+    label(heading,page.subtitle,12,"muted",{Position=UDim2.fromOffset(0,35),Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
     if page.special and page.special~="settings" then special(pageRoot,page.special) end
     for _,section in ipairs(page.groups or {}) do
         local c=card(pageRoot,section.title)
@@ -391,17 +459,27 @@ function UI.layout()
     local viewport=root.AbsoluteSize
     local vw=viewport.X>0 and viewport.X or 800
     local vh=viewport.Y>0 and viewport.Y or 600
-    local w=math.max(260,math.min(780,vw-20))
-    local h=math.max(220,math.min(530,vh-28))
+    local portrait=vh>vw
+    UI.Compact=portrait or vw<620
+    local w=portrait and math.min(380,math.max(260,vw-32)) or (UI.Compact and 600 or 720)
+    local h=portrait and 500 or (UI.Compact and 400 or 460)
+    local fit=math.min(1,math.max(1,vw-32)/w,math.max(1,vh-32)/h)
+    local zoom=math.clamp(tonumber(value("ui.scale",85)) or 85,70,100)/100
+    UI.Scale,UI.Width,UI.Height=math.max(.01,fit*zoom),w,h
+    local renderedW,renderedH=w*UI.Scale,h*UI.Scale
     local first=not UI.Positioned
+    local x=first and (vw-renderedW)/2 or host.Position.X.Offset
+    local y=first and (vh-renderedH)/2 or host.Position.Y.Offset
+    host.Size=UDim2.fromOffset(renderedW,renderedH)
+    host.Position=UDim2.fromOffset(math.clamp(x,8,math.max(8,vw-renderedW-8)),math.clamp(y,8,math.max(8,vh-renderedH-8)))
     window.Size=UDim2.fromOffset(w,h)
-    local x=first and (vw-w)/2 or window.Position.X.Offset
-    local y=first and (vh-h)/2 or window.Position.Y.Offset
-    window.Position=UDim2.fromOffset(math.clamp(x,0,math.max(0,vw-w)),math.clamp(y,0,math.max(0,vh-h)))
-    UI.Positioned=true;UI.Compact=w<560
+    windowScale.Scale=UI.Scale
+    UI.Positioned=true
     side.Size=UDim2.new(0,170,1,0);sideLine.Visible=not UI.Compact
     content.Position=UDim2.fromOffset(UI.Compact and 0 or 171,0)
     content.Size=UDim2.new(1,UI.Compact and 0 or -171,1,0)
+    UI.PageWidth=math.max(100,w-(UI.Compact and 0 or 171)-40)
+    if pageRoot then pageRoot.Size=UDim2.fromOffset(UI.PageWidth,pageRoot.Size.Y.Offset) end
     menuButton.Visible=UI.Compact;logo.Visible=not UI.Compact
     title.Position=UDim2.fromOffset(UI.Compact and 54 or 65,13)
     title.Size=UDim2.new(1,UI.Compact and -151 or -170,0,23)
@@ -411,13 +489,15 @@ function UI.layout()
     dragArea.Position=UDim2.fromOffset(54,0);dragArea.Size=UDim2.new(1,-148,1,0)
     footerText.Text=UI.Compact and "UI preview • tanpa aksi game" or "Mode pratinjau • aksi game belum dihubungkan"
     UI.drawer(false)
+    Session.Layout={Width=w,Height=h,Scale=UI.Scale,RenderedWidth=renderedW,RenderedHeight=renderedH,ViewportWidth=vw,ViewportHeight=vh,PageWidth=UI.PageWidth}
 end
+
 connect(root:GetPropertyChangedSignal("AbsoluteSize"),UI.layout)
 connect(content:GetPropertyChangedSignal("CanvasPosition"),UI.closePopup)
 connect(dragArea.InputBegan,function(input)
     if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
         UI.closePopup();Session.ActiveSlider=nil
-        Session.Drag={input=input,x=input.Position.X,y=input.Position.Y,startX=window.Position.X.Offset,startY=window.Position.Y.Offset}
+        Session.Drag={input=input,x=input.Position.X,y=input.Position.Y,startX=host.Position.X.Offset,startY=host.Position.Y.Offset}
     end
 end)
 connect(Input.InputChanged,function(input)
@@ -427,7 +507,7 @@ connect(Input.InputChanged,function(input)
     local drag=Session.Drag
     if drag and (input==drag.input or input.UserInputType==Enum.UserInputType.MouseMovement) then
         local vp=root.AbsoluteSize
-        window.Position=UDim2.fromOffset(math.clamp(drag.startX+input.Position.X-drag.x,0,math.max(0,vp.X-window.AbsoluteSize.X)),math.clamp(drag.startY+input.Position.Y-drag.y,0,math.max(0,vp.Y-window.AbsoluteSize.Y)))
+        host.Position=UDim2.fromOffset(math.clamp(drag.startX+input.Position.X-drag.x,8,math.max(8,vp.X-host.AbsoluteSize.X-8)),math.clamp(drag.startY+input.Position.Y-drag.y,8,math.max(8,vp.Y-host.AbsoluteSize.Y-8)))
     end
 end)
 connect(Input.InputEnded,function(input)
@@ -445,3 +525,4 @@ function Session.Cleanup()
     if G.__ZekioPremiumUI==Session then G.__ZekioPremiumUI=nil end
 end
 UI.layout();UI.show("overview")
+

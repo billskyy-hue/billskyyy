@@ -1,4 +1,4 @@
--- Zekio Supreme Premium | UI ONLY P3
+-- Zekio Supreme Premium | UI ONLY P4
 -- Self-contained interface. Every feature action is an unconnected UI stub.
 -- No gameplay discovery, remotes, movement, item actions or key verification.
 local G = (getgenv and getgenv()) or _G
@@ -72,6 +72,65 @@ local function button(parent, text, size, callback, primary, pageScope)
     if callback then connect(b.MouseButton1Click,function() if alive() then callback() end end,pageScope) end
     return b
 end
+-- Original native line icons. No image assets or external icon library.
+local MENU_ICONS={
+    overview={rects={{2,2,8,8,2},{14,2,8,5,2},{14,11,8,11,2},{2,14,8,8,2}}},
+    farm={paths={{4,21,17,8},{4,6,9,3,14,3,19,6,22,12},{9,3,8,8},{15,4,14,10}}},
+    farmer={paths={{12,22,12,11},{12,14,6,13,3,8,8,7,12,10,12,14},{12,11,14,5,21,3,21,8,17,12,12,12}}},
+    pabrik={paths={{2,22,2,11,8,7,8,11,14,7,14,11,22,11,22,22,2,22},{16,11,16,2,20,2,20,11},{6,16,6,18},{12,16,12,18},{18,16,18,18}}},
+    dirt={paths={{2,6,12,2,22,6,12,10,2,6},{2,12,12,16,22,12},{2,18,12,22,22,18}}},
+    clear={paths={{3,15,13,5,16,5,22,11,22,14,14,22,9,22,3,16,3,15},{8,10,17,19},{10,22,23,22}}},
+    splice={paths={{6,6,6,18},{6,13,12,13,18,7,18,6}},circles={{6,4,2},{6,20,2},{18,4,2}}},
+    door={rects={{4,2,16,20,2}},circles={{16,12,0.7}},paths={{1,12,10,12},{7,9,10,12,7,15}}},
+    drop={paths={{12,22,4.5,11.5,4,8,5,5,8,2.5,12,2,16,2.5,19,5,20,8,19.5,11.5,12,22}},circles={{12,8,2.5}}},
+    growscan={paths={{2,8,2,2,8,2},{16,2,22,2,22,8},{22,16,22,22,16,22},{8,22,2,22,2,16},{6,12,18,12}},circles={{12,12,3}}},
+    inventory={rects={{6,6,12,16,3},{8,13,8,6,2}},paths={{9,6,9,2,15,2,15,6},{3,11,3,17},{21,11,21,17}}},
+    vending={rects={{4,11,16,11,1},{14,15,4,7,1}},paths={{2,11,5,3,19,3,22,11,2,11},{8,3,7,11},{16,3,17,11},{7,16,10,16}}},
+    chat={paths={{4,3,20,3,22,5,22,15,20,17,9,17,3,22,3,5,4,3},{7,8,17,8},{7,12,14,12}}},
+    bonus={rects={{3,10,18,12,1},{2,7,20,4,1}},paths={{12,7,12,22},{12,7,8,7,5,5,5,3,7,2,10,3,12,7},{12,7,16,7,19,5,19,3,17,2,14,3,12,7}}},
+    security={paths={{12,2,21,6,20,14,17,19,12,22,7,19,4,14,3,6,12,2},{8,12,11,15,17,9}}},
+    settings={circles={{12,12,7},{12,12,3}},paths={{20,12,22,12},{17.6569,17.6569,19.0711,19.0711},{12,20,12,22},{6.3431,17.6569,4.9289,19.0711},{4,12,2,12},{6.3431,6.3431,4.9289,4.9289},{12,4,12,2},{17.6569,6.3431,19.0711,4.9289}}},
+    stats={paths={{2,2,2,22,22,22}},rects={{6,13,3,8,0.6},{11,8,3,13,0.6},{16,3,3,18,0.6}}},
+    key={circles={{7,8,5}},paths={{10.5,11.5,21,22},{16,17,19,14},{19,20,22,17}}},
+    updates={rects={{5,2,15,20,2}},paths={{3,6,7,6},{3,12,7,12},{3,18,7,18},{10,7,16,7},{10,12,16,12},{10,17,14,17}}},
+    world={circles={{12,12,10}},paths={{2,12,22,12},{4,7,20,7},{4,17,20,17},{12,2,8.5,5,7,12,8.5,19,12,22},{12,2,15.5,5,17,12,15.5,19,12,22}}},
+    tools={paths={{13,2,15.5,8.5,22,11,15.5,13.5,13,20,10.5,13.5,4,11,10.5,8.5,13,2},{4,2,4,6},{2,4,6,4}}},
+}
+local ICON_ALIASES={farming="farmer",items="inventory",system="settings"}
+function UI.icon(parent,name,x,y,size,token)
+    local key=ICON_ALIASES[name] or name
+    local data=MENU_ICONS[key] or MENU_ICONS.overview
+    local host=frame(parent,UDim2.fromOffset(size,size),nil,{Name="MenuIcon_"..name,Position=UDim2.fromOffset(x,y),Active=false})
+    local canvas=frame(host,UDim2.fromOffset(24,24),nil,{Name="IconCanvas",Active=false})
+    make("UIScale",{Scale=size/24},canvas)
+    token=token or "accent"
+    for _,path in ipairs(data.paths or {}) do
+        for i=1,#path-2,2 do
+            local x1,y1,x2,y2=path[i],path[i+1],path[i+2],path[i+3]
+            local dx,dy=x2-x1,y2-y1
+            local line=frame(canvas,UDim2.fromOffset(math.sqrt(dx*dx+dy*dy),2),token,{
+                AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromOffset((x1+x2)/2,(y1+y2)/2),Rotation=math.deg(math.atan2(dy,dx)),Active=false})
+            round(line,1)
+        end
+    end
+    local function ring(px,py,w,h,radius)
+        local shape=frame(canvas,UDim2.fromOffset(w,h),nil,{Position=UDim2.fromOffset(px,py),Active=false})
+        round(shape,radius)
+        local stroke=make("UIStroke",{Thickness=2,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},shape)
+        UI.tint(stroke,"Color",token)
+    end
+    for _,c in ipairs(data.circles or {}) do ring(c[1]-c[3],c[2]-c[3],c[3]*2,c[3]*2,99) end
+    for _,r in ipairs(data.rects or {}) do ring(r[1],r[2],r[3],r[4],r[5]) end
+    return host
+end
+-- Visible labels are separate from decorative icons, keeping the whole row clickable.
+function UI.menuLabel(b,text,name,height,selected,hasArrow)
+    b.TextTransparency=1
+    local token=selected and "onAccent" or "text"
+    UI.icon(b,name,10,(height-18)/2,18,selected and "onAccent" or "accent")
+    label(b,text,12,token,{Name="MenuTitle",Position=UDim2.fromOffset(36,0),Size=UDim2.new(1,hasArrow and -62 or -44,1,0),Font=Enum.Font.GothamBold,TextWrapped=true,Active=false})
+end
+
 local function value(key, initial)
     if V[key]==nil then V[key]=initial end
     return V[key]
@@ -117,7 +176,7 @@ local PAGES = {
     settings={title="Setelan",subtitle="Sesuaikan tampilan Zekio Supreme Premium.",special="settings",groups={group("Tampilan",{s("ui.theme","Tema",{"Gelap","Terang"}),r("ui.scale","Ukuran UI",85,70,100,5,"%"),t("ui.notifications","Notifikasi UI","Tampilkan pesan dari tombol pratinjau.",true),info("Preferensi di pratinjau ini hanya tersimpan selama UI terbuka.")})}},
     stats={title="Statistik",subtitle="Ringkasan aktivitas setelah fitur dihubungkan.",special="stats"},
     key={title="Akun & Key",subtitle="Panel akses Zekio Supreme Premium.",special="key",action="Verifikasi key",groups={group("License key",{f("key.value","Key premium","Masukkan key premium"),info("Validasi key belum dihubungkan. Tidak ada key yang dikirim atau diverifikasi.")})}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P3.",groups={group("12 November 2026",{info("19 menu dengan tema hitam–ungu dan pilihan tema terang."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Sidebar dan bagian pengaturan dapat dibuka/tutup dengan tombol +/−."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P4.",groups={group("12 November 2026",{info("19 menu dengan ikon khusus, judul berikon, dan aksen ungu."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Sidebar dan bagian pengaturan dapat dibuka/tutup dengan tombol +/−."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
@@ -127,7 +186,7 @@ local GROUPS={
     {id="system",title="Sistem",mark="S",pages={"settings","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM UI P3"
+Session.Build="PREMIUM UI P4"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -167,7 +226,7 @@ local content=make("ScrollingFrame",{Name="PageContent",BackgroundTransparency=1
 UI.tint(content,"ScrollBarImageColor3","accent")
 local footer=frame(window,UDim2.new(1,0,0,30),"side",{Position=UDim2.new(0,0,1,-30)})
 local footerText=label(footer,"Mode pratinjau • aksi game belum dihubungkan",11,"muted",{Position=UDim2.fromOffset(13,0),Size=UDim2.new(1,-55,1,0)})
-label(footer,"P3",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
+label(footer,"P4",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
 local shade=button(body,"",UDim2.fromScale(1,1),function() UI.drawer(false) end,false)
 shade.BackgroundTransparency=.35;shade.ZIndex=29;shade.Visible=false
 local bubble=button(root,"ZS",UDim2.fromOffset(54,54),function() window.Visible=true;UI.Bubble.Visible=false end,true)
@@ -275,7 +334,8 @@ local function card(parent,titleText)
     headerButton.Name="SectionToggle_"..key
     headerButton.Position=UDim2.fromOffset(14,8)
     headerButton.BackgroundTransparency=1
-    label(headerButton,titleText,13,"text",{Size=UDim2.new(1,-28,1,0),Font=Enum.Font.GothamBold})
+    UI.icon(headerButton,UI.Page,0,9,18,"accent")
+    label(headerButton,titleText,13,"text",{Position=UDim2.fromOffset(26,0),Size=UDim2.new(1,-54,1,0),Font=Enum.Font.GothamBold})
     local arrow=label(headerButton,"−",18,"accent",{Position=UDim2.new(1,-24,0,0),Size=UDim2.fromOffset(24,36),TextXAlignment=Enum.TextXAlignment.Right})
     local inner=frame(cardFrame,UDim2.new(1,-28,0,0),nil,{Name="CardContent",Position=UDim2.fromOffset(14,50)})
     local layout=stack(inner,12)
@@ -406,7 +466,8 @@ function UI.navigation()
     UI.NavConnections={}
     local function navButton(text,id,groupId)
         local b=button(nav,text,UDim2.new(1,0,0,37),nil,UI.Page==id,false)
-        b.TextXAlignment=Enum.TextXAlignment.Left;padding(b,10)
+        b.Name="Nav_"..id
+        UI.menuLabel(b,PAGES[id].title,id,37,UI.Page==id,false)
         UI.NavConnections[#UI.NavConnections+1]=b.MouseButton1Click:Connect(function() if alive() then UI.show(id,groupId) end end)
     end
     navButton("Ringkasan","overview")
@@ -414,7 +475,9 @@ function UI.navigation()
         local section=g
         local expanded=UI.Group==g.id
         local b=button(nav,g.title.."   "..(expanded and "−" or "+"),UDim2.new(1,0,0,39),nil,false,false)
-        b.TextXAlignment=Enum.TextXAlignment.Left;padding(b,10)
+        b.Name="NavGroup_"..g.id
+        UI.menuLabel(b,g.title,g.id,39,false,true)
+        label(b,expanded and "−" or "+",16,"accent",{Name="GroupArrow",Position=UDim2.new(1,-22,0,0),Size=UDim2.fromOffset(12,39),TextXAlignment=Enum.TextXAlignment.Right,Active=false})
         UI.NavConnections[#UI.NavConnections+1]=b.MouseButton1Click:Connect(function()
             if not alive() then return end
             if UI.Group==section.id then
@@ -426,7 +489,7 @@ function UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"UI ONLY  •  P3",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"UI ONLY  •  P4",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 local function special(parent,name)
     if name=="overview" then
@@ -434,7 +497,9 @@ local function special(parent,name)
         local shortcuts=card(parent,"Akses cepat")
         for _,id in ipairs({"farmer","pabrik","dirt","clear"}) do
             local target=id
-            button(shortcuts,PAGES[id].title,UDim2.new(1,0,0,42),function() UI.show(target,"farming") end,false,true)
+            local shortcut=button(shortcuts,PAGES[id].title,UDim2.new(1,0,0,42),function() UI.show(target,"farming") end,false,true)
+            shortcut.Name="Shortcut_"..id
+            UI.menuLabel(shortcut,PAGES[id].title,id,42,false,false)
         end
     elseif name=="stats" then
         local c=card(parent,"Aktivitas sesi")
@@ -466,8 +531,11 @@ function UI.show(id,groupId)
     end,true)
     local page=PAGES[id]
     local heading=frame(pageRoot,UDim2.new(1,0,0,66),nil,{AutomaticSize=Enum.AutomaticSize.Y})
-    label(heading,page.title,21,"text",{Size=UDim2.new(1,0,0,28),Font=Enum.Font.GothamBold})
-    label(heading,page.subtitle,12,"muted",{Position=UDim2.fromOffset(0,35),Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
+    local badge=frame(heading,UDim2.fromOffset(40,40),"soft",{Name="PageIconBadge",Position=UDim2.fromOffset(0,2),Active=false})
+    round(badge,11)
+    UI.icon(badge,id,8,8,24,"accent")
+    label(heading,page.title,21,"text",{Position=UDim2.fromOffset(52,0),Size=UDim2.new(1,-52,0,28),Font=Enum.Font.GothamBold})
+    label(heading,page.subtitle,12,"muted",{Position=UDim2.fromOffset(52,35),Size=UDim2.new(1,-52,0,0),AutomaticSize=Enum.AutomaticSize.Y,TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
     if page.special and page.special~="settings" then special(pageRoot,page.special) end
     for _,section in ipairs(page.groups or {}) do
         local c=card(pageRoot,section.title)
@@ -556,5 +624,3 @@ function Session.Cleanup()
     if G.__ZekioPremiumUI==Session then G.__ZekioPremiumUI=nil end
 end
 UI.layout();UI.show("overview")
-
-

@@ -1,4 +1,4 @@
--- Zekio | Tembus Batu r2 | standalone
+-- Zekio | Tembus Batu r3 | standalone
 local G = (getgenv and getgenv()) or _G
 if G.__ZekioRockOnly and G.__ZekioRockOnly.Cleanup then pcall(G.__ZekioRockOnly.Cleanup) end
 local Session = { Connections = {} }
@@ -65,25 +65,25 @@ do
     Session.Gui = gui
     local panel = Instance.new("Frame")
     panel.AnchorPoint, panel.Position = Vector2.new(0.5, 0), UDim2.new(0.5, 0, 0, 105)
-    panel.Size = UDim2.new(0.9, 0, 0, 172)
+    panel.Size = UDim2.new(0.9, 0, 0, 202)
     panel.BackgroundColor3, panel.BorderSizePixel = Color3.fromRGB(23, 25, 33), 0
     panel.Parent = gui
     Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
     local constraint = Instance.new("UISizeConstraint")
-    constraint.MaxSize, constraint.Parent = Vector2.new(420, 172), panel
+    constraint.MaxSize, constraint.Parent = Vector2.new(420, 202), panel
     local title = Instance.new("TextLabel")
     title.Position, title.Size = UDim2.fromOffset(14, 10), UDim2.new(1, -60, 0, 25)
     title.BackgroundTransparency, title.TextXAlignment = 1, Enum.TextXAlignment.Left
-    title.Text, title.Font, title.TextSize = "Zekio | Tembus Batu r2", Enum.Font.GothamBold, 17
+    title.Text, title.Font, title.TextSize = "Zekio | Tembus Batu r3", Enum.Font.GothamBold, 17
     title.TextColor3, title.Parent = Color3.fromRGB(245, 245, 250), panel
     local close = Instance.new("TextButton")
     close.Position, close.Size = UDim2.new(1, -42, 0, 9), UDim2.fromOffset(30, 28)
     close.Text, close.TextSize, close.BackgroundTransparency = "X", 17, 1
     close.TextColor3, close.Parent = Color3.fromRGB(220, 220, 230), panel
     local status = Instance.new("TextLabel")
-    status.Position, status.Size = UDim2.fromOffset(14, 44), UDim2.new(1, -28, 0, 65)
+    status.Position, status.Size = UDim2.fromOffset(14, 44), UDim2.new(1, -28, 0, 96)
     status.BackgroundTransparency, status.TextWrapped = 1, true
-    status.Font, status.TextSize, status.TextColor3 = Enum.Font.Gotham, 13, Color3.fromRGB(200, 205, 220)
+    status.Font, status.TextSize, status.TextColor3 = Enum.Font.Gotham, 12, Color3.fromRGB(200, 205, 220)
     status.TextXAlignment, status.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
     status.Text, status.Parent = Rock.Status, panel
     UI.Status = status
@@ -589,24 +589,9 @@ end
 
 
 
-local function steerX(s, targetX, tol)
-    local dx = targetX - s.x
-    local vx = s.vx or 0
-    local decel = s.grounded and 48 or 17
-    local dir = 0
-    if abs(dx) > tol then
-        dir = dx > 0 and 1 or -1
-        if vx * dir > 0 and (vx * vx) / (2 * decel) >= abs(dx) - tol * 0.5 then
-            dir = 0
-        end
-    end
-    AutoInput.left = dir < 0
-    AutoInput.right = dir > 0
-end
 
 
-
--- TEMPORARY LOCAL PHASE MODE
+-- CROSS, BRAKE ABOVE THE FLOOR, THEN LAND WITH COLLISION RESTORED.
 local function autoOn()
     return alive() and Rock.Running and not Rock.Cancelled and Refs.World == Rock.World
         and Refs.World.fg == Rock.Grid and os.clock() < Rock.Deadline
@@ -616,7 +601,6 @@ function Rock.restorePhase()
     if not Rock.GhostSaved then return true end
     local w, previous = Rock.GhostWorld, Rock.GhostPrevious
     local ok, err = pcall(function()
-        -- Do not overwrite a value that the game already changed itself.
         if rawget(w, "ghost") == true then w.ghost = previous end
     end)
     if ok then
@@ -625,6 +609,24 @@ function Rock.restorePhase()
         Rock.RestoreError = tostring(err)
     end
     return ok
+end
+
+-- Coordinates describe the feet, not the centre of the player. Inspect the
+-- whole 0.6 x 0.95 body so collision is never restored with feet in a block.
+local function bodyClear(x, feet)
+    for bx = floor(x - 0.3 + 0.0001), floor(x + 0.3 - 0.0001) do
+        for by = floor(feet - 0.95 + 0.0001), floor(feet - 0.0001) do
+            if not openAt(bx, by) then return false end
+        end
+    end
+    return true
+end
+
+local function supported(x, row)
+    for bx = floor(x - 0.3 + 0.0001), floor(x + 0.3 - 0.0001) do
+        if not realSupport(bx, row) then return false end
+    end
+    return true
 end
 
 function Rock.phaseTarget(s, dir)
@@ -645,7 +647,9 @@ function Rock.phaseTarget(s, dir)
         local x = sx + distance * dir
         if x >= 0 and x < w.w then
             for y = math.max(0, sy - 3), math.min(w.h - 2, sy + 5) do
-                if openAt(x, y) and realSupport(x, y) then
+                -- Hover 0.35 tile above the floor, leaving room to coast without
+                -- entering the support. Normal gravity completes the landing.
+                if bodyClear(x + 0.5, y + 0.65) and supported(x + 0.5, y) then
                     local score = abs(y - sy) * 5 + distance
                     if not bestScore or score < bestScore then
                         best, bestScore = { x = x, y = y }, score
@@ -654,8 +658,25 @@ function Rock.phaseTarget(s, dir)
             end
         end
     end
-    if not best then return nil, "Tidak ada tempat berhenti kosong di sisi itu" end
+    if not best then return nil, "Tidak ada tempat mendarat kosong di sisi itu" end
     return best, edge
+end
+
+local function axisInput(delta, velocity, tolerance, dt)
+    if abs(delta) <= tolerance then return 0 end
+    local dir = delta > 0 and 1 or -1
+    local stopDistance = velocity * velocity / 34 + abs(velocity) * dt
+    if velocity * dir > 0 and stopDistance >= abs(delta) - tolerance * 0.5 then return 0 end
+    return dir
+end
+
+function Rock.report(message)
+    local d = Rock.Diagnostic
+    if not d then return message end
+    local s = playerState()
+    local current = s and ("(%.2f,%.2f)"):format(s.x, s.y) or "tidak terbaca"
+    return tostring(message) .. ("\nAwal (%.1f,%.1f) > tujuan (%d,%d)"):format(d.x, d.y, d.tx, d.ty)
+        .. "\nPosisi " .. current .. " | " .. tostring(d.stage or "-")
 end
 
 function Rock.perform(dir, cancel)
@@ -664,67 +685,104 @@ function Rock.perform(dir, cancel)
     local target, edge = Rock.phaseTarget(s, dir)
     if not target then return false, edge end
     if cancel() then return false, "Gerakan dibatalkan" end
+    local d = { x = s.x, y = s.y, tx = target.x, ty = target.y, stage = "melewati batu" }
+    Rock.Diagnostic = d
     Rock.GhostWorld, Rock.GhostPrevious, Rock.GhostSaved = w, rawget(w, "ghost"), true
     Rock.RestoreError = nil
+    local previousGhost = Rock.GhostPrevious
     local enabled, err = pcall(function() w.ghost = true end)
     if not enabled then return false, "Mode tembus lokal gagal diaktifkan: " .. tostring(err) end
-    Rock.status(dir > 0 and "Mode tembus: bergerak ke kanan..." or "Mode tembus: bergerak ke kiri...")
-    local cx, cy, origin = target.x + 0.5, target.y + 0.95, s.x
-    local bestDistance = abs(cx - s.x) + abs(cy - s.y)
-    local progressAt, furthest, reached = os.clock(), 0, false
+    local cx, hoverY, floorY = target.x + 0.5, target.y + 0.65, target.y + 1
+    local sample = { x = s.x, y = s.y, t = os.clock() }
+    local function velocity(cur)
+        local now = os.clock()
+        local dt = math.max(0.001, now - sample.t)
+        local vx, vy = tonumber(cur.vx) or 0, tonumber(cur.vy) or 0
+        if now > sample.t then vx, vy = (cur.x - sample.x) / dt, (cur.y - sample.y) / dt end
+        local previousX = sample.x
+        sample = { x = cur.x, y = cur.y, t = now }
+        return vx, vy, math.min(dt, 0.15), previousX
+    end
+    local bestDistance = abs(cx - s.x) + abs(hoverY - s.y)
+    local progressAt, settledAt, nearAt, lastStatus = os.clock(), nil, nil, 0
+    local reached, furthest = false, 0
     while autoOn() and not cancel() do
         local cur = playerState()
         if not cur or cur.dead then return false, "Karakter tidak siap saat tembus" end
-        local projection = (cur.x - origin) * dir
-        if furthest > 1 and projection < furthest - 1.2 then
+        local vx, vy, dt, previousX = velocity(cur)
+        local projection = (cur.x - d.x) * dir
+        if furthest > 1 and (previousX - cur.x) * dir > 1.2 then
             return false, "Posisi dikembalikan game saat mencoba tembus"
         end
         furthest = math.max(furthest, projection)
-        local distance = abs(cx - cur.x) + abs(cy - cur.y)
-        if distance < bestDistance - 0.05 then
-            bestDistance, progressAt = distance, os.clock()
+        local dx, dy = cx - cur.x, hoverY - cur.y
+        local distance = abs(dx) + abs(dy)
+        if distance < bestDistance - 0.04 then bestDistance, progressAt = distance, os.clock() end
+        if distance < 0.8 and not nearAt then nearAt = os.clock() end
+        local ready = abs(dx) <= 0.17 and abs(dy) <= 0.13 and abs(vx) <= 0.45 and abs(vy) <= 0.45
+            and floorY - cur.y >= 0.1 and bodyClear(cur.x, cur.y) and supported(cur.x, target.y)
+        if ready then
+            releaseInput()
+            settledAt = settledAt or os.clock()
+            if os.clock() - settledAt >= 0.25 then reached = true; break end
+        else
+            settledAt = nil
+            local horizontal = axisInput(dx, vx, 0.15, dt)
+            local vertical = axisInput(dy, vy, 0.11, dt)
+            AutoInput.left, AutoInput.right = horizontal < 0, horizontal > 0
+            AutoInput.jump, AutoInput.down = vertical < 0, vertical > 0
         end
-        if abs(cur.x - cx) <= 0.18 and abs(cur.y - cy) <= 0.18 then
-            reached = true
-            break
+        if (not nearAt and os.clock() - progressAt > 2.5) or (nearAt and os.clock() - nearAt > 5) then
+            if (AutoInput.Reads or 0) == 0 then return false, "Kontrol terpasang tetapi belum dibaca game" end
+            return false, nearAt and "Belum bisa berhenti di atas pijakan; gerakan dihentikan"
+                or "Mode tembus lokal belum bisa menggerakkan karakter melewati batu"
         end
-        if os.clock() - progressAt > 1.5 then
-            if (AutoInput.Reads or 0) == 0 then
-                return false, "Kontrol terpasang tetapi belum dibaca game"
-            end
-            return false, "Mode tembus lokal belum bisa menggerakkan karakter melewati batu"
-        end
-        -- The native ghost flag is also used by the game's movement code.
-        -- Keep it on only while this one crossing owns the movement keys.
         w.ghost = true
-        steerX(cur, cx, 0.1)
-        AutoInput.jump, AutoInput.down = cy < cur.y - 0.1, cy > cur.y + 0.1
+        d.stage = nearAt and "mengerem sebelum mendarat" or "melewati batu"
+        if os.clock() - lastStatus > 0.25 then
+            Rock.status(Rock.report(dir > 0 and "Bergerak ke kanan..." or "Bergerak ke kiri..."))
+            lastStatus = os.clock()
+        end
         task.wait()
     end
     releaseInput()
     if cancel() then return false, "Gerakan dibatalkan" end
     if not reached then return false, "Tujuan tembus belum tercapai" end
     if not Rock.restorePhase() then return false, "Mode tembus belum dapat dipulihkan: " .. Rock.RestoreError end
-    Rock.status("Memeriksa posisi akhir...")
-    local untilAt = os.clock() + 1.2
+    d.stage = previousGhost == true and "memeriksa posisi terbang" or "mendarat"
+    Rock.status(Rock.report("Memeriksa posisi akhir..."))
+    local untilAt, landedAt = os.clock() + 3, nil
+    local maxXDrift = 0
     repeat
-        task.wait(0.05)
+        task.wait()
         if cancel() then return false, "Gerakan dibatalkan" end
         local cur = playerState()
         if not cur or cur.dead then return false, "Karakter tidak siap setelah tembus" end
+        local vx, vy, dt = velocity(cur)
         if (floor(cur.x) - edge) * dir < 1 then
-            return false, "Posisi kembali ke sisi awal setelah pengaturan tembus dipulihkan"
+            return false, "Posisi kembali ke sisi awal setelah mode tembus dilepas"
         end
-        if solidAt(floor(cur.x), floor(cur.y - 0.475)) then
-            return false, "Karakter masih di dalam block; posisi tembus belum berhasil"
-        end
+        if not bodyClear(cur.x, cur.y) then return false, "Karakter menyentuh block saat mendarat" end
+        if cur.y > floorY + 0.2 then return false, "Pijakan terlewati saat mendarat; posisi belum aman" end
+        maxXDrift = math.max(maxXDrift, abs(cur.x - cx))
+        if maxXDrift > 0.7 then return false, "Posisi bergeser terlalu jauh setelah mode tembus dilepas" end
+        local horizontal = axisInput(cx - cur.x, vx, 0.15, dt)
+        AutoInput.left, AutoInput.right = horizontal < 0, horizontal > 0
+        AutoInput.jump, AutoInput.down = false, false
+        local onFloor = cur.grounded == true and abs(cur.y - floorY) <= 0.15
+        local stable = abs(cur.x - cx) <= 0.18 and abs(vx) <= 0.45 and abs(vy) <= 0.45
+            and supported(cur.x, target.y) and (onFloor or (previousGhost == true and abs(cur.y - hoverY) <= 0.15))
+        if stable then
+            releaseInput()
+            landedAt = landedAt or os.clock()
+            if os.clock() - landedAt >= 1.2 then
+                d.stage = previousGhost == true and "mode terbang awal tetap aktif" or "sudah berpijak"
+                return true, ("Sudah tembus ke %s (%d,%d)"):format(dir > 0 and "kanan" or "kiri",
+                    floor(cur.x), floor(cur.y - 0.475))
+            end
+        else landedAt = nil end
     until os.clock() >= untilAt
-    local cur = playerState()
-    if not cur or abs(cur.x - cx) > 0.6 or abs(cur.y - cy) > 1 then
-        return false, "Posisi akhir belum stabil setelah tembus"
-    end
-    return true, ("Sudah tembus ke %s (%d,%d)"):format(dir > 0 and "kanan" or "kiri",
-        floor(cur.x), floor(cur.y - 0.475))
+    return false, "Posisi belum menetap di pijakan; gerakan dihentikan"
 end
 
 function Rock.cancel()
@@ -737,6 +795,7 @@ function Rock.cancel()
 end
 function Rock.start(dir)
     if Rock.Busy or not alive() then return false end
+    Rock.Diagnostic, Rock.RestoreError = nil, nil
     Rock.Busy, Rock.Cancelled, Rock.Running = true, false, false
     Rock.Token = Rock.Token + 1
     local token = Rock.Token
@@ -777,7 +836,8 @@ function Rock.start(dir)
         elseif not ok then message = "Gagal: " .. tostring(passed)
         elseif os.clock() >= Rock.Deadline then message = "Waktu habis; coba arah lain" end
         if Rock.RestoreError then message = tostring(message or "Selesai") .. " | pemulihan: " .. Rock.RestoreError end
-        Rock.status(message or "Selesai")
+        Session.LastReport = Rock.report(message or "Selesai")
+        Rock.status(Session.LastReport)
     end)
     return true
 end
@@ -798,4 +858,4 @@ listen(UI.Left.MouseButton1Click, function() Rock.start(-1) end)
 listen(UI.Right.MouseButton1Click, function() Rock.start(1) end)
 listen(UI.Cancel.MouseButton1Click, Rock.cancel)
 listen(UI.Close.MouseButton1Click, Session.Cleanup)
-Rock.status("Mode tembus batu. Pilih kiri atau kanan.")
+Rock.status("Pilih kiri atau kanan. Tunggu sampai mendarat.")

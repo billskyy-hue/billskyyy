@@ -1,4 +1,4 @@
--- Zekio | Lewati Batu r1 | standalone
+-- Zekio | Tembus Batu r2 | standalone
 local G = (getgenv and getgenv()) or _G
 if G.__ZekioRockOnly and G.__ZekioRockOnly.Cleanup then pcall(G.__ZekioRockOnly.Cleanup) end
 local Session = { Connections = {} }
@@ -16,7 +16,6 @@ local Refs, UI = {}, {}
 local AutoInput = { active = false, left = false, right = false, jump = false, down = false }
 local Move = { Rock = { Busy = false, Running = false, Cancelled = false, Token = 0, Status = "Siap. Pilih arah tujuan." } }
 local Rock = Move.Rock
-local BadEdge = {}
 local floor, abs = math.floor, math.abs
 local ItemDB
 local MenuModOk, MenuModule = false, nil
@@ -51,7 +50,6 @@ function Rock.status(message)
     Rock.Status = tostring(message or "")
     if alive() and UI.Status then pcall(function() UI.Status.Text = Rock.Status end) end
 end
-local function setMoveStatus(message) Rock.status(message) end
 
 -- Small native panel: left, right, cancel, close.
 do
@@ -76,7 +74,7 @@ do
     local title = Instance.new("TextLabel")
     title.Position, title.Size = UDim2.fromOffset(14, 10), UDim2.new(1, -60, 0, 25)
     title.BackgroundTransparency, title.TextXAlignment = 1, Enum.TextXAlignment.Left
-    title.Text, title.Font, title.TextSize = "Zekio | Lewati Batu r1", Enum.Font.GothamBold, 17
+    title.Text, title.Font, title.TextSize = "Zekio | Tembus Batu r2", Enum.Font.GothamBold, 17
     title.TextColor3, title.Parent = Color3.fromRGB(245, 245, 250), panel
     local close = Instance.new("TextButton")
     close.Position, close.Size = UDim2.new(1, -42, 0, 9), UDim2.fromOffset(30, 28)
@@ -517,12 +515,8 @@ Session.UnbindInput = AutoInput.unbindMenu
 
 
 
--- WORLD GEOMETRY AND NATIVE MOVEMENT
-local function autoOn()
-    return alive() and Rock.Running and not Rock.Cancelled and Refs.World == Rock.World
-        and Refs.World.fg == Rock.Grid and os.clock() < Rock.Deadline
-end
-local function frame() task.wait(); return autoOn() end
+
+-- WORLD GEOMETRY
 
 local function playerState()
     if not Refs.State then return nil end
@@ -594,232 +588,6 @@ local function realSupport(x, y)
 end
 
 
-local function startNode(s)
-    local ny = floor(s.y - 0.475)
-    local nx = floor(s.x)
-    if realSupport(nx, ny) then return nx, ny end
-    local a, b = floor(s.x - 0.3), floor(s.x + 0.3 - 0.0001)
-    for _, c in ipairs({ a, b }) do
-        if c ~= nx and realSupport(c, ny) then return c, ny end
-    end
-    return nx, ny
-end
-
-
-local function heapPush(hf, hi, n, f, i)
-    n += 1
-    local k = n
-    while k > 1 do
-        local p = k // 2
-        if hf[p] <= f then break end
-        hf[k], hi[k] = hf[p], hi[p]
-        k = p
-    end
-    hf[k], hi[k] = f, i
-    return n
-end
-
-local function heapPop(hf, hi, n)
-    local top = hi[1]
-    local lf, li = hf[n], hi[n]
-    hf[n], hi[n] = nil, nil
-    n -= 1
-    if n > 0 then
-        local k = 1
-        while true do
-            local c = k * 2
-            if c > n then break end
-            if c < n and hf[c + 1] < hf[c] then c += 1 end
-            if lf <= hf[c] then break end
-            hf[k], hi[k] = hf[c], hi[c]
-            k = c
-        end
-        hf[k], hi[k] = lf, li
-    end
-    return top, n
-end
-
--- A*: jalan, jatuh, lompat dan tangga yang sudah ada.
-local MAX_EXPAND = 8000
-
-local function reachOffsets(R)
-    return floor(R), math.ceil(-R + 0.025), floor(R + 0.025)
-end
-
-local function astar(sx, sy, goals, gx, gy, R, useBlock)
-    local w = Refs.World
-    if not w then return nil, false, {} end
-    local W, H = w.w, w.h
-    local WH = W * H
-    local dxm, dyLo, dyHi = reachOffsets(R)
-    local oC, sC = {}, {}
-
-    local function open(x, y)
-        if x < 0 or x >= W or y >= H then return false end
-        if y < 0 then return true end
-        local i = y * W + x
-        local v = oC[i]
-        if v == nil then
-            v = openAt(x, y)
-            oC[i] = v
-        end
-        return v
-    end
-
-    local function sup(x, y)
-        if x < 0 or x >= W or y < 0 or y >= H then return false end
-        local i = y * W + x
-        local v = sC[i]
-        if v == nil then
-            v = realSupport(x, y)
-            sC[i] = v
-        end
-        return v
-    end
-
-    local function h(x, y)
-        local dx = abs(gx - x) - R
-        local dyRaw = gy - y
-        local dy = abs(dyRaw) - R
-        local vw = (dyRaw < 0) and 1.5 or 0.5
-        return (dx > 0 and dx or 0) + vw * (dy > 0 and dy or 0)
-    end
-
-    local function isGoal(nx, ny)
-        -- goals.maxY: tempat berdiri tidak boleh lebih bawah dari ini
-        if goals.maxY and ny > goals.maxY then return false end
-        for ty = ny + dyLo, ny + dyHi do
-            if ty >= 0 and ty < H then
-                local base = ty * W
-                for tx = nx - dxm, nx + dxm do
-                    -- jangan berdiri tepat di atas target (noSelf: juga jangan di dalam tile target)
-                    if tx >= 0 and tx < W and goals[base + tx] and not (tx == nx and ty == ny + 1)
-                        and not (goals.noSelf and tx == nx and ty == ny)
-                        and not (goals.los and ty - ny >= 2 and not open(tx, ny + 1))
-                        and not (goals.los and ny - ty >= 2 and not open(tx, ny - 1)) then
-                        return true
-                    end
-                end
-            end
-        end
-        return false
-    end
-
-    local ex, ey, ek, ec, eb = {}, {}, {}, {}, {}
-    local n = 0
-    local function add(x, y, kind, cost, build)
-        n += 1
-        ex[n], ey[n], ek[n], ec[n], eb[n] = x, y, kind, cost, build
-    end
-
-    local function expand(x, y)
-        n = 0
-        for s = -1, 1, 2 do
-            local ax = x + s
-            if open(ax, y) then
-                if sup(ax, y) then
-                    add(ax, y, "walk", 1, false)
-                else
-                    -- jatuh sampai ketemu pijakan
-                    local fy = y + 1
-                    while fy < H and fy - y <= 40 and open(ax, fy) and not sup(ax, fy) do
-                        fy += 1
-                    end
-                    if fy < H and open(ax, fy) and sup(ax, fy) then
-                        add(ax, fy, "fall", 1 + 0.5 * (fy - y), false)
-                    end
-                    -- lompati lubang 1-2 tile
-                    if open(x, y - 1) and open(x, y - 2) then
-                        for dist = 2, 3 do
-                            local mx = x + (dist - 1) * s
-                            if not (open(mx, y) and open(mx, y - 1) and open(mx, y - 2)) then break end
-                            if dist == 3 and sup(mx, y) then break end
-                            local bx = x + dist * s
-                            if open(bx, y - 1) and open(bx, y - 2) then
-                                for k = 0, 2 do
-                                    if not open(bx, y + k) then break end
-                                    if sup(bx, y + k) then
-                                        add(bx, y + k, "gap", dist + 0.5 + 0.5 * k, false)
-                                        break
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            -- lompat naik (atas kepala harus kosong)
-            for dy = 1, 3 do
-                if not open(x, y - dy) then break end
-                if open(x, y - dy - 1) and open(ax, y - dy) and sup(ax, y - dy) and open(ax, y - dy - 1) then
-                    add(ax, y - dy, "jump", 1 + 1.5 * dy, false)
-                end
-            end
-            -- tangga: naik 1-2 tile ke lorong setinggi 1 tile (atapnya pas di atas kepala,
-            -- jadi lompat biasa tidak muat). Rapat ke dinding, lompat, geser masuk di puncak.
-            for dy = 1, 2 do
-                if open(x, y - 1) and (dy == 1 or open(x, y - 2)) and open(ax, y - dy) and sup(ax, y - dy)
-                    and not (open(x, y - dy - 1) and open(ax, y - dy - 1)) then
-                    add(ax, y - dy, "stair", 3 + 1.5 * dy, false)
-                end
-            end
-        end
-        return n
-    end
-
-    local startI = sy * W + sx
-    local g, came, kind, buildOf, closed = { [startI] = 0 }, {}, {}, {}, {}
-    local hf, hi, hn = {}, {}, 0
-    hn = heapPush(hf, hi, hn, h(sx, sy), startI)
-    local expanded = 0
-    local now = os.clock()
-
-    while hn > 0 do
-        local cur
-        cur, hn = heapPop(hf, hi, hn)
-        if not closed[cur] then
-            closed[cur] = true
-            local cx, cy = cur % W, cur // W
-            if isGoal(cx, cy) then
-                local path = {}
-                local i = cur
-                while i ~= startI do
-                    local p = came[i]
-                    table.insert(path, 1, {
-                        fx = p % W, fy = p // W, x = i % W, y = i // W,
-                        kind = kind[i], build = buildOf[i], key = p * WH + i,
-                    })
-                    i = p
-                end
-                return path, false, closed
-            end
-            expanded += 1
-            if expanded > (goals.maxExpand or MAX_EXPAND) then return nil, false, closed end
-            if expanded % 400 == 0 then
-                task.wait()
-                if not autoOn() then return nil, false, closed end
-            end
-            local gc = g[cur]
-            local cnt = expand(cx, cy)
-            for k = 1, cnt do
-                local ni = ey[k] * W + ex[k]
-                if not closed[ni] then
-                    local bad = BadEdge[cur * WH + ni]
-                    if not (bad and bad > now) then
-                        local ng = gc + ec[k]
-                        local old = g[ni]
-                        if old == nil or ng < old then
-                            g[ni], came[ni], kind[ni], buildOf[ni] = ng, cur, ek[k], eb[k]
-                            hn = heapPush(hf, hi, hn, ng + h(ex[k], ey[k]), ni)
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return nil, true, closed -- tidak ada jalan sama sekali
-end
-
 
 local function steerX(s, targetX, tol)
     local dx = targetX - s.x
@@ -836,303 +604,135 @@ local function steerX(s, targetX, tol)
     AutoInput.right = dir > 0
 end
 
--- Jalan sampai berdiri di tengah tile tujuan
-local function execWalk(tx, ty)
-    local cx = tx + 0.5
-    local s0 = playerState()
-    if not s0 then return false end
-    local limit = 1.5 + abs(cx - s0.x) * 0.35
-    local t0 = os.clock()
-    while frame() do
-        local s = playerState()
-        if not s or s.dead then return false end
-        local nx, ny = floor(s.x), floor(s.y - 0.475)
-        if s.grounded and ny ~= ty then return false end
-        steerX(s, cx, 0.1)
-        if nx == tx and abs(s.x - cx) <= 0.2 and s.grounded and abs(s.vx or 0) < 2 then
-            AutoInput.left, AutoInput.right = false, false
-            return true
-        end
-        if os.clock() - t0 > limit then return false end
-    end
-    return false
+
+
+-- TEMPORARY LOCAL PHASE MODE
+local function autoOn()
+    return alive() and Rock.Running and not Rock.Cancelled and Refs.World == Rock.World
+        and Refs.World.fg == Rock.Grid and os.clock() < Rock.Deadline
 end
 
--- Jalan ke pinggir lalu jatuh ke tile tujuan
-local function execFall(e)
-    local cx = e.x + 0.5
-    local limit = 1.5 + 0.3 * (e.y - e.fy)
-    local t0 = os.clock()
-    while frame() do
-        local s = playerState()
-        if not s or s.dead then return false end
-        steerX(s, cx, 0.1)
-        if s.grounded then
-            local nx, ny = floor(s.x), floor(s.y - 0.475)
-            if ny == e.y then
-                if nx == e.x and abs(s.x - cx) <= 0.25 then return true end
-            elseif ny ~= e.fy then
-                return false
-            end
-        end
-        if os.clock() - t0 > limit then return false end
+function Rock.restorePhase()
+    if not Rock.GhostSaved then return true end
+    local w, previous = Rock.GhostWorld, Rock.GhostPrevious
+    local ok, err = pcall(function()
+        -- Do not overwrite a value that the game already changed itself.
+        if rawget(w, "ghost") == true then w.ghost = previous end
+    end)
+    if ok then
+        Rock.GhostSaved, Rock.GhostWorld, Rock.GhostPrevious = nil, nil, nil
+    else
+        Rock.RestoreError = tostring(err)
     end
-    return false
+    return ok
 end
 
--- Lompat naik ke tile sebelah
-local function execJump(e)
-    if not execWalk(e.fx, e.fy) then return false end
-    local dy = e.fy - e.y
-    local top = e.y + 1                               -- tinggi kaki di tujuan
-    local releaseY = top - ((dy == 1) and 0 or 0.4)   -- lepas lompat di sini (kepala tidak kebentur)
-    local cx = e.x + 0.5
-    releaseInput()
-    if not frame() then return false end              -- lepas 1 frame supaya lompat terbaca
-    AutoInput.jump = true
-    local t0 = os.clock()
-    local airborne = false
-    while frame() do
-        local s = playerState()
-        if not s or s.dead then return false end
-        if not s.grounded then airborne = true end
-        if AutoInput.jump and (s.y <= releaseY or (airborne and (s.vy or 0) >= 0)) then
-            AutoInput.jump = false
-        end
-        if s.y <= top + 0.25 then
-            steerX(s, cx, 0.1)
-        else
-            steerX(s, e.fx + 0.5, 0.15)
-        end
-        if airborne and s.grounded then
-            local nx, ny = floor(s.x), floor(s.y - 0.475)
-            if ny == e.y then
-                if nx == e.x and abs(s.x - cx) <= 0.25 then
-                    AutoInput.jump = false
-                    return true
-                end
-            else
-                return false
-            end
-        end
-        if not airborne and os.clock() - t0 > 0.35 then return false end
-        if os.clock() - t0 > 1.8 then return false end
-    end
-    return false
-end
-
--- Lompati lubang: ancang-ancang, lompat di ujung, rem di udara
-local function execGap(e)
-    if not execWalk(e.fx, e.fy) then return false end
-    local s0 = playerState()
-    if not s0 then return false end
-    local dir = (e.x > e.fx) and 1 or -1
-    local takeoff = e.fx + 0.5 + dir * 0.6
-    local startY = s0.y
-    local cx = e.x + 0.5
-    releaseInput()
-    local t0 = os.clock()
-    local jumped, airborne, jumpAt = false, false, 0
-    while frame() do
-        local s = playerState()
-        if not s or s.dead then return false end
-        if not jumped then
-            AutoInput.left, AutoInput.right = dir < 0, dir > 0
-            if (s.x - takeoff) * dir >= 0 or not s.grounded then
-                jumped, jumpAt = true, os.clock()
-                AutoInput.jump = s.grounded
-            end
-        else
-            if not s.grounded then airborne = true end
-            if AutoInput.jump and (s.y <= startY - 1 or (airborne and (s.vy or 0) >= 0)) then
-                AutoInput.jump = false
-            end
-            steerX(s, cx, 0.1)
-            if airborne and s.grounded then
-                local nx, ny = floor(s.x), floor(s.y - 0.475)
-                if ny == e.y then
-                    if nx == e.x and abs(s.x - cx) <= 0.25 then return true end
-                else
-                    return false
-                end
-            end
-            if not airborne and os.clock() - jumpAt > 0.35 then return false end
-        end
-        if os.clock() - t0 > 2.2 then return false end
-    end
-    return false
-end
-
--- Tangga lahan: naik 1-2 tile ke lorong setinggi 1 tile (lewat lubang tangga / keluar dari lubang).
--- Cara main manual: berdiri rapat ke sisi tujuan, lompat, tekan arah tujuan SETELAH badan naik
--- (kalau ditekan terlalu cepat badan masuk ke bawah block tujuan -> kepala kebentur -> jatuh),
--- saat kepala menempel atap lorong kaki sudah di atas block tujuan -> geser masuk. 3 cara dicoba.
-function Move.execStair(e)
-    if not execWalk(e.fx, e.fy) then return false end
-    local dir = (e.x > e.fx) and 1 or -1
-    local top = e.y + 1 -- tinggi kaki di tujuan (atas block pijakan)
-    local hug = e.fx + 0.5 + dir * 0.17
-    for try = 1, 3 do
-        -- rapat ke dinding sisi tujuan
-        local t0 = os.clock()
-        while frame() do
-            local s = playerState()
-            if not s or s.dead then return false end
-            steerX(s, hug, 0.03)
-            if abs(s.x - hug) <= 0.06 and abs(s.vx or 0) < 1 then break end
-            if os.clock() - t0 > 0.8 then break end
-        end
-        releaseInput()
-        if not frame() then return false end
-        local s0 = playerState()
-        if not s0 then return false end
-        local y0 = s0.y
-        AutoInput.jump = true
-        t0 = os.clock()
-        local airborne, landed = false, nil
-        while frame() do
-            local s = playerState()
-            if not s or s.dead then return false end
-            if not s.grounded then airborne = true end
-            if AutoInput.jump and (s.y <= top - 0.1 or (airborne and (s.vy or 0) >= 0)) then
-                AutoInput.jump = false -- sudah setinggi tujuan / kena atap
-            end
-            -- Saat lompat di bawah atap lorong, kepala menempel di atap +-0.18 dtk dan kaki sudah di atas block
-            -- tujuan: tekan arah di saat itu -> badan langsung masuk lorong (tidak perlu diangkat game).
-            -- Tombol arah JANGAN ditekan di lantai: badan masuk ke bawah block tujuan -> kepala kebentur -> jatuh.
-            -- coba 1: saat kaki sudah setinggi atas block tujuan (menempel atap)
-            -- coba 2: setelah naik 0.15 tile (menempel sisi block, game mengangkat badan s/d 0.3 tile)
-            -- coba 3: saat kaki 0.25 tile di bawah atas block
-            local press = (try == 1 and s.y <= top + 0.02) or (try == 2 and s.y <= y0 - 0.15) or (try == 3 and s.y <= top + 0.25)
-            if airborne and press then
-                AutoInput.right, AutoInput.left = dir > 0, dir < 0
-            else
-                steerX(s, hug, 0.03)
-            end
-            if airborne and s.grounded then
-                landed = floor(s.y - 0.475)
-                break
-            end
-            if not airborne and os.clock() - t0 > 0.35 then break end
-            if os.clock() - t0 > 1.8 then break end
-        end
-        releaseInput()
-        if landed == e.y then
-            return execWalk(e.x, e.y) -- sudah di lorong atas: ke tengah tile tujuan
-        end
-        if landed ~= nil and landed ~= e.fy then return false end -- jatuh ke tempat lain
-        if not execWalk(e.fx, e.fy) then return false end
-    end
-    return false
-end
-
-
-
-local function followPath(path, cancel)
-    local i = 1
-    while i <= #path do
-        if cancel() or not autoOn() then releaseInput(); return false, "cancelled" end
-        local e, last = path[i], i
-        if e.build or e.kind == "pillar" then return false, "unsupported" end
-        local ok
-        if e.kind == "walk" then
-            local dir = e.x - e.fx
-            while path[last + 1] and path[last + 1].kind == "walk" and not path[last + 1].build
-                and path[last + 1].y == e.y and path[last + 1].x - path[last + 1].fx == dir do last += 1 end
-            ok = execWalk(path[last].x, path[last].y)
-        elseif e.kind == "fall" then ok = execFall(e)
-        elseif e.kind == "jump" then ok = execJump(e)
-        elseif e.kind == "gap" then ok = execGap(e)
-        elseif e.kind == "stair" then ok = Move.execStair(e)
-        else return false, "unsupported" end
-        releaseInput()
-        if cancel() then return false, "cancelled" end
-        if not ok then
-            if e.key then BadEdge[e.key] = os.clock() + 3 end
-            return false
-        end
-        i = last + 1
-    end
-    return true
-end
-
--- ROCK CROSSING
-
-function Move.Rock.plan(s, dir, cancel)
+function Rock.phaseTarget(s, dir)
     local w = Refs.World
-    if not w or not s or not s.grounded then return nil, "Berdiri di atas pijakan dulu" end
-    local sx, sy = startNode(s)
-    local edge, found = sx + dir, false
+    local sx, sy = floor(s.x), floor(s.y - 0.475)
+    local edge, found = sx, false
     for distance = 1, 3 do
         local x = sx + distance * dir
         if x < 0 or x >= w.w then break end
-        if not openAt(x, sy) then edge, found = x, true; break end
+        if solidAt(x, sy) then edge, found = x, true; break end
     end
     if found then
-        -- Tujuan harus melewati seluruh lebar batu, bukan berhenti di atasnya.
         while edge + dir >= 0 and edge + dir < w.w and abs(edge + dir - sx) <= 8
-            and not openAt(edge + dir, sy) do edge += dir end
+            and solidAt(edge + dir, sy) do edge += dir end
     end
-    local goals = {}
+    local best, bestScore
     for distance = math.max(2, (edge - sx) * dir + 1), 12 do
         local x = sx + distance * dir
         if x >= 0 and x < w.w then
             for y = math.max(0, sy - 3), math.min(w.h - 2, sy + 5) do
                 if openAt(x, y) and realSupport(x, y) then
-                    goals[#goals + 1] = { x = x, y = y, idx = y * w.w + x,
-                        score = abs(y - sy) * 3 + distance }
+                    local score = abs(y - sy) * 5 + distance
+                    if not bestScore or score < bestScore then
+                        best, bestScore = { x = x, y = y }, score
+                    end
                 end
             end
         end
     end
-    table.sort(goals, function(a, b)
-        if a.score ~= b.score then return a.score < b.score end
-        if a.y ~= b.y then return a.y < b.y end
-        return a.idx < b.idx
-    end)
-    for i = 1, math.min(#goals, 24) do
-        if cancel() or Refs.World ~= w then return nil, "Gerakan dibatalkan" end
-        local t = goals[i]
-        local path = astar(sx, sy, { [t.idx] = true, maxExpand = 1200 }, t.x, t.y, 0.5, false)
-        if cancel() or Refs.World ~= w then return nil, "Gerakan dibatalkan" end
-        if path and #path > 0 then return path, t, edge end
-    end
-    return nil, "Belum ada jalur lompat yang bisa dilalui ke sisi itu; coba sisi lain"
+    if not best then return nil, "Tidak ada tempat berhenti kosong di sisi itu" end
+    return best, edge
 end
 
-function Move.Rock.perform(dir, cancel)
-    local s = playerState()
+function Rock.perform(dir, cancel)
+    local w, s = Refs.World, playerState()
     if not s or s.dead then return false, "Karakter belum siap" end
-    local path, target, edge = Move.Rock.plan(s, dir, cancel)
-    if not path then return false, target end
+    local target, edge = Rock.phaseTarget(s, dir)
+    if not target then return false, edge end
     if cancel() then return false, "Gerakan dibatalkan" end
-    Move.Rock.status(dir > 0 and "Melewati batu ke kanan..." or "Melewati batu ke kiri...")
-    local ok, reason = followPath(path, cancel)
+    Rock.GhostWorld, Rock.GhostPrevious, Rock.GhostSaved = w, rawget(w, "ghost"), true
+    Rock.RestoreError = nil
+    local enabled, err = pcall(function() w.ghost = true end)
+    if not enabled then return false, "Mode tembus lokal gagal diaktifkan: " .. tostring(err) end
+    Rock.status(dir > 0 and "Mode tembus: bergerak ke kanan..." or "Mode tembus: bergerak ke kiri...")
+    local cx, cy, origin = target.x + 0.5, target.y + 0.95, s.x
+    local bestDistance = abs(cx - s.x) + abs(cy - s.y)
+    local progressAt, furthest, reached = os.clock(), 0, false
+    while autoOn() and not cancel() do
+        local cur = playerState()
+        if not cur or cur.dead then return false, "Karakter tidak siap saat tembus" end
+        local projection = (cur.x - origin) * dir
+        if furthest > 1 and projection < furthest - 1.2 then
+            return false, "Posisi dikembalikan game saat mencoba tembus"
+        end
+        furthest = math.max(furthest, projection)
+        local distance = abs(cx - cur.x) + abs(cy - cur.y)
+        if distance < bestDistance - 0.05 then
+            bestDistance, progressAt = distance, os.clock()
+        end
+        if abs(cur.x - cx) <= 0.18 and abs(cur.y - cy) <= 0.18 then
+            reached = true
+            break
+        end
+        if os.clock() - progressAt > 1.5 then
+            if (AutoInput.Reads or 0) == 0 then
+                return false, "Kontrol terpasang tetapi belum dibaca game"
+            end
+            return false, "Mode tembus lokal belum bisa menggerakkan karakter melewati batu"
+        end
+        -- The native ghost flag is also used by the game's movement code.
+        -- Keep it on only while this one crossing owns the movement keys.
+        w.ghost = true
+        steerX(cur, cx, 0.1)
+        AutoInput.jump, AutoInput.down = cy < cur.y - 0.1, cy > cur.y + 0.1
+        task.wait()
+    end
     releaseInput()
-    if cancel() or reason == "cancelled" then return false, "Gerakan dibatalkan" end
-    if not ok then return false, "Belum berhasil melewati batu; coba sisi lain" end
-    -- Tunggu pembaruan posisi game agar gerakan yang dikembalikan tidak
-    -- dilaporkan berhasil hanya karena controller sempat mencapai tujuan.
-    local untilAt = os.clock() + 0.35
+    if cancel() then return false, "Gerakan dibatalkan" end
+    if not reached then return false, "Tujuan tembus belum tercapai" end
+    if not Rock.restorePhase() then return false, "Mode tembus belum dapat dipulihkan: " .. Rock.RestoreError end
+    Rock.status("Memeriksa posisi akhir...")
+    local untilAt = os.clock() + 1.2
     repeat
         task.wait(0.05)
         if cancel() then return false, "Gerakan dibatalkan" end
+        local cur = playerState()
+        if not cur or cur.dead then return false, "Karakter tidak siap setelah tembus" end
+        if (floor(cur.x) - edge) * dir < 1 then
+            return false, "Posisi kembali ke sisi awal setelah pengaturan tembus dipulihkan"
+        end
+        if solidAt(floor(cur.x), floor(cur.y - 0.475)) then
+            return false, "Karakter masih di dalam block; posisi tembus belum berhasil"
+        end
     until os.clock() >= untilAt
     local cur = playerState()
-    if cur and not cur.dead and cur.grounded and (floor(cur.x) - edge) * dir >= 1 then
-        return true, ("Sudah lewat ke %s (%d,%d)"):format(dir > 0 and "kanan" or "kiri",
-            floor(cur.x), floor(cur.y - 0.475))
+    if not cur or abs(cur.x - cx) > 0.6 or abs(cur.y - cy) > 1 then
+        return false, "Posisi akhir belum stabil setelah tembus"
     end
-    return false, "Posisi belum melewati batu atau dikembalikan game; coba sisi lain"
+    return true, ("Sudah tembus ke %s (%d,%d)"):format(dir > 0 and "kanan" or "kiri",
+        floor(cur.x), floor(cur.y - 0.475))
 end
-
-
 
 function Rock.cancel()
     if not Rock.Busy then return end
     Rock.Cancelled, Rock.Running = true, false
     AutoInput.active = false
     releaseInput()
+    Rock.restorePhase()
     Rock.status("Membatalkan gerakan...")
 end
 function Rock.start(dir)
@@ -1156,10 +756,8 @@ function Rock.start(dir)
             if cancelled() then return false, "Gerakan dibatalkan" end
             local s = playerState()
             if not s or s.dead then return false, "Karakter belum siap" end
-            if not s.grounded then return false, "Berdiri di atas pijakan dulu" end
             Rock.World, Rock.Grid = Refs.World, Refs.World.fg
             Rock.Deadline, Rock.Running = os.clock() + 20, true
-            table.clear(BadEdge)
             AutoInput.active = true
             releaseInput()
             local function cancel()
@@ -1171,12 +769,14 @@ function Rock.start(dir)
         if Rock.Token ~= token then return end
         Rock.Busy, Rock.Running, AutoInput.active = false, false, false
         releaseInput()
+        Rock.restorePhase()
         AutoInput.unbindMenu()
         Session.Objects, Session.ScanCancel = nil, nil
         if not alive() then return end
         if Rock.Cancelled then message = "Gerakan dibatalkan"
         elseif not ok then message = "Gagal: " .. tostring(passed)
         elseif os.clock() >= Rock.Deadline then message = "Waktu habis; coba arah lain" end
+        if Rock.RestoreError then message = tostring(message or "Selesai") .. " | pemulihan: " .. Rock.RestoreError end
         Rock.status(message or "Selesai")
     end)
     return true
@@ -1185,6 +785,7 @@ function Session.Cleanup()
     Session.Closed = true
     Rock.Cancelled, Rock.Running, AutoInput.active = true, false, false
     releaseInput()
+    pcall(Rock.restorePhase)
     pcall(AutoInput.unbindMenu)
     for _, connection in ipairs(Session.Connections) do pcall(function() connection:Disconnect() end) end
     if Session.Gui then pcall(function() Session.Gui:Destroy() end) end
@@ -1197,4 +798,4 @@ listen(UI.Left.MouseButton1Click, function() Rock.start(-1) end)
 listen(UI.Right.MouseButton1Click, function() Rock.start(1) end)
 listen(UI.Cancel.MouseButton1Click, Rock.cancel)
 listen(UI.Close.MouseButton1Click, Session.Cleanup)
-Rock.status("Siap. Berdiri dekat batu lalu pilih kiri atau kanan.")
+Rock.status("Mode tembus batu. Pilih kiri atau kanan.")

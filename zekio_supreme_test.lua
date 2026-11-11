@@ -14,7 +14,7 @@ end
 -- terlihat meskipun jendela utama belum berhasil dibuat.
 do (function()
     local gui, label
-    local stage, stageAt = "Memulai TEST r25", os.clock()
+    local stage, stageAt = "Memulai TEST r26", os.clock()
     function Session.GuiParent(fallback)
         if not fallback then
             local p = game:GetService("Players").LocalPlayer
@@ -57,7 +57,7 @@ do (function()
                 close.MouseButton1Click:Connect(function() Session.CloseBoot() end)
             end)
         end
-        if label then pcall(function() label.Text = "ZEKIO SUPREME TEST r25\n" .. tostring(message):sub(1, 1100) end) end
+        if label then pcall(function() label.Text = "ZEKIO SUPREME TEST r26\n" .. tostring(message):sub(1, 1100) end) end
     end
     function Session.Report(message)
         stage, stageAt = tostring(message), os.clock()
@@ -5492,6 +5492,7 @@ local function farmerCfg()
         exclude = nil,   -- [idx] = true: jangan tanam di tile ini
         row = nil,               -- Farmer: semua baris yang masuk jangkauan
         batch = true,            -- jeda sekali per putaran, bukan per tile
+        sweepPlant = true,       -- Farmer: tanam sambil menyusuri jalur; Pabrik tidak berubah
         collect = Farmer.Collect, -- ambil drop panen dulu sebelum lanjut
         status = function(t) Farmer.Status = t end,
         onHarvest = function(id)
@@ -5580,6 +5581,9 @@ function Move.farmerAreaTargets(s, kind, cfg)
                 elseif not harvesting and cfg.plant and id == 0
                     and (not cfg.plantSet or cfg.plantSet[idx])
                     and (not cfg.exclude or not cfg.exclude[idx])
+                    and not (cfg.sweepPlant and Farmer.PlantRoute
+                        and Farmer.PlantRoute.world == w and Farmer.PlantRoute.seed == cfg.seed
+                        and (Farmer.PlantRoute.pending[idx] or 0) > now)
                     and plantSpotOk(x, y, cfg.seed) then
                     list[#list + 1] = { x = x, y = y, idx = idx }
                 end
@@ -5705,6 +5709,11 @@ function Move.farmerArea(s)
                 cfg.onPlant()
                 planted += 1
                 Farmer.BatchPlanted = planted
+                if cfg.sweepPlant then
+                    local route = Move.farmerPlantState(cfg)
+                    route.pending[t.idx] = os.clock() + 1
+                    route.nextPulseAt = os.clock() + math.max(0.14, (cfg.pms or 250) / 1000)
+                end
             else
                 failed += 1
                 skipTile(cfg.skip, t.idx, 3)
@@ -5822,6 +5831,156 @@ local function farmerWorkInReach(s)
     return done
 end
 
+-- Status lintasan terpisah dari FC: FC diperbarui setiap putaran Farmer,
+-- tetapi arah baris harus tetap sama sampai sisi itu selesai.
+function Move.farmerPlantState(cfg)
+    local r = Farmer.PlantRoute
+    if not r or r.world ~= Refs.World or r.seed ~= cfg.seed then
+        r = { world = Refs.World, seed = cfg.seed, pending = {}, nextPulseAt = 0 }
+        Farmer.PlantRoute = r
+    end
+    return r
+end
+
+-- Pilih ujung lintasan, bukan satu tile terdekat setiap kali. Pada baris
+-- lain dekati ujung terdekat dulu, lalu susuri baris dari ujung tersebut.
+function Move.farmerPlantTarget(cfg, list, px, py)
+    local r, valid = Move.farmerPlantState(cfg), {}
+    local now = os.clock()
+    for _, t in ipairs(list) do
+        if (r.pending[t.idx] or 0) <= now and plantSpotOk(t.x, t.y, cfg.seed) then
+            valid[#valid + 1] = t
+        end
+    end
+    if #valid == 0 then return nil end
+    local y, first, last = valid[1].y, valid[1], valid[#valid]
+    if y ~= py then
+        local entry = abs(first.x - px) <= abs(last.x - px) and first or last
+        r.y, r.dir = y, entry == first and 1 or -1
+        return entry
+    end
+    if r.y ~= y or not r.dir then
+        local s = playerState()
+        r.y, r.dir = y, (s and (s.facing or 1) < 0) and -1 or 1
+    end
+    local lo, hi = px, px
+    while lo > 0 and openAt(lo - 1, y) and realSupport(lo - 1, y) do lo -= 1 end
+    while hi + 1 < r.world.w and openAt(hi + 1, y) and realSupport(hi + 1, y) do hi += 1 end
+    for turn = 1, 2 do
+        local best
+        for _, t in ipairs(valid) do
+            if t.x >= lo and t.x <= hi and (t.x - px) * r.dir >= 0
+                and (not best or (t.x - best.x) * r.dir > 0) then best = t end
+        end
+        if best then return best end
+        if turn == 1 then r.dir = -r.dir end
+    end
+    -- Ada celah / tangga: A* tetap menentukan jalur yang aman ke bagian lain.
+    local nearest
+    for _, t in ipairs(valid) do
+        if not nearest or abs(t.x - px) < abs(nearest.x - px) then nearest = t end
+    end
+    r.dir = nearest.x >= px and 1 or -1
+    return nearest
+end
+
+-- Satu pulsa tanpa task.wait: jeda tanam tidak menghentikan tombol gerak.
+-- Tile kosong, izin, jangkauan dan stok diperiksa lagi tepat sebelum kirim.
+function Move.farmerPlantPulse(cfg, r)
+    local function live()
+        return FC == cfg and cfg.run() and alive() and Refs.World == r.world
+            and Farmer.Plant and not Farmer.HarvestOnly and Farmer.SeedId == cfg.seed
+    end
+    if not live() or not cfg.plant or not cfg.seed or os.clock() < r.nextPulseAt then return 0 end
+    local s = playerState()
+    if not s or s.dead or not s.grounded then return 0 end
+    r.nextPulseAt = os.clock() + math.max(0.14, (cfg.pms or 250) / 1000)
+    local targets, R = Move.farmerAreaTargets(s, "plant", cfg)
+    local py = floor(s.y - 0.475)
+    table.sort(targets, function(a, b)
+        local ay, by = abs(a.y - py), abs(b.y - py)
+        if ay ~= by then return ay < by end
+        if a.x ~= b.x then return (a.x - b.x) * (r.dir or 1) < 0 end
+        return a.y < b.y
+    end)
+    local planted = 0
+    for _, t in ipairs(targets) do
+        if not live() or invCount(cfg.seed) <= 0 then break end
+        local cur = playerState()
+        if cur and cur.grounded and not cur.dead and stateReaches(cur, t.x, t.y, R)
+            and (r.pending[t.idx] or 0) <= os.clock() and plantSpotOk(t.x, t.y, cfg.seed) then
+            if sendSetTile("fg", t.x, t.y, cfg.seed) then
+                r.pending[t.idx] = os.clock() + 1
+                if Refs.Inv then pcall(function() Refs.Inv:remove(cfg.seed, 1) end) end
+                cfg.onPlant()
+                planted += 1
+            else
+                skipTile(cfg.skip, t.idx, 3)
+            end
+        end
+    end
+    if planted > 0 then
+        Farmer.BatchPlanted = planted
+        cfg.status(("Tanam sambil jalan: %d tile | seed %d"):format(planted, invCount(cfg.seed)))
+    end
+    return planted
+end
+
+-- Pohon yang baru ready tetap dapat memotong perjalanan tanam. Tile yang
+-- sudah dinyatakan tidak terjangkau sementara tidak memicu putaran sia-sia.
+function Move.farmerPlantReady(cfg)
+    if not cfg.harvest then return false end
+    local w, now, st = Refs.World, os.clock(), workspace:GetServerTimeNow()
+    if not w then return false end
+    local s = playerState()
+    if not s or s.dead then return false end
+    local sx, sy = startNode(s)
+    local filter = reachFilter(sy * w.w + sx, punchReach() - 0.35, scaffoldId() ~= nil)
+    for y, row in pairs(w.fg) do
+        if type(y) == "number" and type(row) == "table" then
+            for x, id in pairs(row) do
+                if type(x) == "number" and id ~= 0 and not skipped(cfg.skip, y * w.w + x, now)
+                    and (not filter or filter[y * w.w + x])
+                    and (not cfg.only or id == cfg.only) and (not cfg.area or cfg.area(x, y)) then
+                    local readyAt = treeReadyAt(x, y, id)
+                    if readyAt and st >= readyAt and canWorkAt(x, y) then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- Gerakan mendatar digabung sampai ujung lintasan. Tanam berjalan pada
+-- frame yang sama, tanpa coroutine lain yang bisa tertinggal saat Stop.
+function Move.farmerPlantWalk(tx, ty, cfg, r, cancel)
+    local start = playerState()
+    if not start then return false end
+    local cx, at = tx + 0.5, os.clock()
+    local limit = 1.5 + abs(cx - start.x) * 0.5
+    while frame() do
+        if cancel() then releaseInput(); return false, "cancelled" end
+        local s = playerState()
+        if not s or s.dead or not s.grounded or floor(s.y - 0.475) ~= ty then
+            releaseInput(); return false, "moved"
+        end
+        Move.farmerPlantPulse(cfg, r)
+        if cancel() then releaseInput(); return false, "cancelled" end
+        if abs(s.x - cx) <= 0.2 and abs(s.vx or 0) < 2 then
+            releaseInput(); return true
+        end
+        local dir = cx > s.x and 1 or -1
+        local nx = math.clamp(floor(s.x + dir * 0.55), math.min(floor(s.x), tx), math.max(floor(s.x), tx))
+        if not openAt(nx, ty) or not realSupport(nx, ty) then
+            releaseInput(); return false, "blocked"
+        end
+        steerX(s, cx, 0.1)
+        if os.clock() - at > limit then releaseInput(); return false, "timeout" end
+    end
+    releaseInput()
+    return false, "cancelled"
+end
+
 -- Cari target + kapan pohon berikutnya siap.
 --   Panen : pohon yang paling awal matang; jarak jadi pembanding kalau waktunya sama.
 --   Tanam : rapi per baris. Selesaikan 1 baris dulu (baris yang sedang dikerjakan,
@@ -5897,7 +6056,7 @@ local function farmerScan(px, py, maxN, filter)
     if #best > 0 or not doPlant then return best, nextReady end
 
     -- tanam rapi: baris yang sedang dikerjakan dulu, lalu baris terdekat
-    local lock = FC.row and FC.row.y
+    local lock = FC.sweepPlant and Move.farmerPlantState(FC).y or (FC.row and FC.row.y)
     local order = {}
     for y in pairs(rows) do order[#order + 1] = y end
     local function rowKey(y) return (y == lock) and -1 or math.abs(y - py) end
@@ -5909,6 +6068,10 @@ local function farmerScan(px, py, maxN, filter)
     for _, y in ipairs(order) do
         local list = rows[y]
         table.sort(list, function(a, b) return a.x < b.x end) -- dari kiri ke kanan
+        if FC.sweepPlant then
+            local target = Move.farmerPlantTarget(FC, list, px, py)
+            if target then return { target }, nextReady end
+        else
         for _, t in ipairs(list) do
             if plantSpotOk(t.x, t.y, FC.seed) then
                 if FC.row then FC.row.y = y end
@@ -5916,9 +6079,68 @@ local function farmerScan(px, py, maxN, filter)
             end
             skipTile(FC.skip, t.idx, 120)
         end
+        end
     end
     if FC.row then FC.row.y = nil end
     return best, nextReady
+end
+
+function Move.farmerPlantTravel(s, cfg, target, useBlock)
+    local w, r = Refs.World, Move.farmerPlantState(cfg)
+    local why, checkAt = nil, 0
+    local function cancel()
+        if FC ~= cfg or not cfg.run() or not alive() or Refs.World ~= w
+            or not Farmer.Plant or Farmer.HarvestOnly or Farmer.SeedId ~= cfg.seed then
+            why = "wait"; return true
+        end
+        if invCount(cfg.seed) <= 0 then why = "work"; return true end
+        if os.clock() >= checkAt then
+            checkAt = os.clock() + 0.25
+            if Move.farmerPlantReady(cfg) then why = "harvest"; return true end
+        end
+        return false
+    end
+    if cancel() then releaseInput(); return why end
+    local sx, sy = startNode(s)
+    local goals = { [target.idx] = true }
+    local path = astar(sx, sy, goals, target.x, target.y, 0.5, useBlock)
+    if cancel() then releaseInput(); return why end
+    if not path then
+        -- Tile dapat ditanam dari samping meski tidak bisa dipijak langsung.
+        local group = { target, cancel = cancel }
+        travelGroup(sx, sy, group, buildReach() - 0.35, useBlock, cfg.skip, FarmerFail)
+        releaseInput()
+        return why or "move"
+    end
+    cfg.status(("Tanam sambil jalan ke (%d,%d)"):format(target.x, target.y))
+    Move.farmerPlantPulse(cfg, r)
+    local i = 1
+    while i <= #path do
+        if cancel() then releaseInput(); return why end
+        local e, last, ok, reason = path[i], i, false, nil
+        if e.kind == "walk" and not e.build then
+            local dir = e.x - e.fx
+            while path[last + 1] and path[last + 1].kind == "walk" and not path[last + 1].build
+                and path[last + 1].y == e.y and (path[last + 1].x - path[last + 1].fx) == dir do
+                last += 1
+            end
+            r.dir = dir
+            ok, reason = Move.farmerPlantWalk(path[last].x, e.y, cfg, r, cancel)
+        else
+            ok, reason = followPath({ e }, cancel)
+            if not cancel() then Move.farmerPlantPulse(cfg, r) end
+        end
+        releaseInput()
+        if cancel() or reason == "cancelled" then return why or "wait" end
+        if not ok then
+            if e.key then BadEdge[e.key] = os.clock() + 3 end
+            skipTile(cfg.skip, target.idx, 3)
+            return "move"
+        end
+        i = last + 1
+    end
+    releaseInput()
+    return "move"
 end
 
 -- Pilih titik berdiri yang benar-benar menjangkau sedikitnya dua pohon
@@ -6000,7 +6222,7 @@ local function updateFarmerStatus()
         .. "\nPanen   : " .. Farmer.Harvested .. "  | tanam: " .. Farmer.Planted .. "  | collect: " .. State.Collected
         .. "\nSeed    : " .. (seed and (itemName(seed) .. " x" .. invCount(seed)) or "-")
         .. "\nMode    : " .. (Farmer.HarvestOnly and "harvest area vertikal + horizontal"
-            or "aksi area sesuai Auto Harvest / Auto Plant")
+            or "tanam sambil jalan per baris + harvest sesuai pilihan")
         .. "\nIsi seed: " .. ((Farmer.Plant and not Farmer.HarvestOnly)
             and (Farmer.RefillStatus or "otomatis saat seed pilihan habis") or "tidak aktif saat harvest saja")
         .. "\nPohon   : " .. (Refs.Trees and "terbaca" or "TIDAK terbaca (harvest mati)")
@@ -6125,6 +6347,7 @@ end
 
 local function fieldStep()
     local w = Refs.World
+    local stepCfg = FC
     local s = playerState()
     if not w or not s or s.dead then
         releaseInput()
@@ -6172,8 +6395,11 @@ local function fieldStep()
     if not targets then
         targets, nextReady = farmerScan(px, py, 8, reachFilter(sy * w.w + sx, R, useBlock))
     end
-    if not FC.run() or not alive() then return "wait" end
+    if FC ~= stepCfg or Refs.World ~= w or not FC.run() or not alive() then return "wait" end
     if #targets == 0 then return "idle", nextReady end
+    if FC.sweepPlant and targets[1].kind == "plant" then
+        return Move.farmerPlantTravel(s, FC, targets[1], useBlock)
+    end
     if FC.batch then
         R = (targets[1].kind == "harvest" and punchReach() or buildReach()) - 0.35
     end
@@ -6186,6 +6412,7 @@ local function fieldStep()
 end
 
 function Farmer.setHarvest(on)
+    Farmer.PlantRoute = nil
     Farmer.Harvest, Farmer.HarvestOnly, Farmer.Drop = on == true, on == true, false
     if on then
         Farmer.Plant = false
@@ -6198,6 +6425,7 @@ function Farmer.setHarvest(on)
 end
 
 function Farmer.setPlant(on)
+    Farmer.PlantRoute = nil
     Farmer.Plant, Farmer.Drop = on == true, false
     if on then
         Farmer.HarvestOnly = false -- Auto Plant adalah pilihan tambahan yang disengaja
@@ -6295,6 +6523,7 @@ local function startFarmer()
     table.clear(Farmer.Row)
     Farmer.DropOffUntil = 0
     Farmer.SweepDir = nil
+    Farmer.PlantRoute = nil
     Farmer.BatchHarvest, Farmer.BatchPlanted = 0, 0
     Farmer.RefillNext, Farmer.RefillSkip, Farmer.RefillWorld, Farmer.RefillFor = 0, {}, nil, nil
     Farmer.RefillStatus = "Otomatis ambil seed pilihan saat habis"
@@ -9771,11 +10000,11 @@ flyButton("▼", 40, function(v) Misc.DownHeld = v end)
 -- UI WINDUI
 ---------------------------------------------------------------------
 -- Bahasa tersimpan dipakai langsung. Pilihan bahasa tidak menahan pembuatan menu.
-Session.Report("Membuat menu TEST r25")
+Session.Report("Membuat menu TEST r26")
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio supreme TEST",
     Icon = "sprout",
-    Author = "v5.9.20 | TEST r25",
+    Author = "v5.9.22 | TEST r26",
     Folder = "ZekioSupremeTest",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -10074,7 +10303,7 @@ end)
 safe(function()
     UI.FarmerPlantToggle = Box.FarmerCtl:Toggle({
         Title = "Auto Plant",
-        Desc = "Opsional: tambahkan tanam area dan ambil seed pilihan saat habis",
+        Desc = "Tanam sambil menyusuri baris, lewati pohon yang sudah ada; ambil seed pilihan saat habis",
         Value = Farmer.Plant,
         Callback = Farmer.setPlant,
     })

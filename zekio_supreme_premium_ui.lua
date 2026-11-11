@@ -1,9 +1,9 @@
--- Zekio Supreme Premium | UI ONLY P2
+-- Zekio Supreme Premium | UI ONLY P3
 -- Self-contained interface. Every feature action is an unconnected UI stub.
 -- No gameplay discovery, remotes, movement, item actions or key verification.
 local G = (getgenv and getgenv()) or _G
 if G.__ZekioPremiumUI and G.__ZekioPremiumUI.Cleanup then pcall(G.__ZekioPremiumUI.Cleanup) end
-local Session = { Connections = {}, PageConnections = {}, Values = {}, Controls = {}, Closed = false }
+local Session = { Connections = {}, PageConnections = {}, Values = {}, Controls = {}, Sections = {}, SectionButtons = {}, Closed = false }
 G.__ZekioPremiumUI = Session
 local Players = game:GetService("Players")
 local Input = game:GetService("UserInputService")
@@ -117,7 +117,7 @@ local PAGES = {
     settings={title="Setelan",subtitle="Sesuaikan tampilan Zekio Supreme Premium.",special="settings",groups={group("Tampilan",{s("ui.theme","Tema",{"Gelap","Terang"}),r("ui.scale","Ukuran UI",85,70,100,5,"%"),t("ui.notifications","Notifikasi UI","Tampilkan pesan dari tombol pratinjau.",true),info("Preferensi di pratinjau ini hanya tersimpan selama UI terbuka.")})}},
     stats={title="Statistik",subtitle="Ringkasan aktivitas setelah fitur dihubungkan.",special="stats"},
     key={title="Akun & Key",subtitle="Panel akses Zekio Supreme Premium.",special="key",action="Verifikasi key",groups={group("License key",{f("key.value","Key premium","Masukkan key premium"),info("Validasi key belum dihubungkan. Tidak ada key yang dikirim atau diverifikasi.")})}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P2.",groups={group("12 November 2026",{info("19 menu dengan tema hitam–ungu dan pilihan tema terang."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P3.",groups={group("12 November 2026",{info("19 menu dengan tema hitam–ungu dan pilihan tema terang."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Sidebar dan bagian pengaturan dapat dibuka/tutup dengan tombol +/−."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
@@ -127,7 +127,7 @@ local GROUPS={
     {id="system",title="Sistem",mark="S",pages={"settings","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM UI P2"
+Session.Build="PREMIUM UI P3"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -167,7 +167,7 @@ local content=make("ScrollingFrame",{Name="PageContent",BackgroundTransparency=1
 UI.tint(content,"ScrollBarImageColor3","accent")
 local footer=frame(window,UDim2.new(1,0,0,30),"side",{Position=UDim2.new(0,0,1,-30)})
 local footerText=label(footer,"Mode pratinjau • aksi game belum dihubungkan",11,"muted",{Position=UDim2.fromOffset(13,0),Size=UDim2.new(1,-55,1,0)})
-label(footer,"P2",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
+label(footer,"P3",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
 local shade=button(body,"",UDim2.fromScale(1,1),function() UI.drawer(false) end,false)
 shade.BackgroundTransparency=.35;shade.ZIndex=29;shade.Visible=false
 local bubble=button(root,"ZS",UDim2.fromOffset(54,54),function() window.Visible=true;UI.Bubble.Visible=false end,true)
@@ -199,7 +199,7 @@ function UI.drawer(open)
 end
 local function disconnectPage()
     for _,c in ipairs(Session.PageConnections) do c:Disconnect() end
-    Session.PageConnections={};Session.Controls={};Session.ActiveSlider=nil
+    Session.PageConnections={};Session.Controls={};Session.SectionButtons={};Session.ActiveSlider=nil
     UI.closePopup()
 end
 function UI.dropdown(anchor, choices, selected, callback)
@@ -267,17 +267,43 @@ local function caption(parent, text, height)
     return label(parent,text,12,"muted",{Size=UDim2.new(1,0,0,height or 30),TextWrapped=true,TextYAlignment=Enum.TextYAlignment.Top})
 end
 local function card(parent,titleText)
-    local cardFrame=frame(parent,UDim2.new(1,0,0,50),"card",{Name="ContentCard"})
+    local key=UI.Page..":"..titleText
+    if Session.Sections[key]==nil then Session.Sections[key]=true end
+    local cardFrame=frame(parent,UDim2.new(1,0,0,54),"card",{Name="ContentCard"})
     round(cardFrame,12);outline(cardFrame)
-    local inner=frame(cardFrame,UDim2.new(1,-28,0,22),nil,{Name="CardContent",Position=UDim2.fromOffset(14,14)})
+    local headerButton=button(cardFrame,"",UDim2.new(1,-28,0,36),nil,false,true)
+    headerButton.Name="SectionToggle_"..key
+    headerButton.Position=UDim2.fromOffset(14,8)
+    headerButton.BackgroundTransparency=1
+    label(headerButton,titleText,13,"text",{Size=UDim2.new(1,-28,1,0),Font=Enum.Font.GothamBold})
+    local arrow=label(headerButton,"−",18,"accent",{Position=UDim2.new(1,-24,0,0),Size=UDim2.fromOffset(24,36),TextXAlignment=Enum.TextXAlignment.Right})
+    local inner=frame(cardFrame,UDim2.new(1,-28,0,0),nil,{Name="CardContent",Position=UDim2.fromOffset(14,50)})
     local layout=stack(inner,12)
-    label(inner,titleText,13,"text",{Size=UDim2.new(1,0,0,22),Font=Enum.Font.GothamBold})
-    UI.fitStack(inner,layout,12,function(height)
+    local contentHeight=0
+    local function applyState()
+        local open=Session.Sections[key]==true
+        inner.Visible=open
+        arrow.Text=open and "−" or "+"
+        local height=open and (contentHeight+64) or 54
+        if cardFrame.Size.Y.Offset~=height then cardFrame.Size=UDim2.new(1,0,0,height) end
+    end
+    local measure=UI.fitStack(inner,layout,12,function(height)
+        contentHeight=height
         if inner.Size.Y.Offset~=height then inner.Size=UDim2.new(1,-28,0,height) end
-        if cardFrame.Size.Y.Offset~=height+28 then cardFrame.Size=UDim2.new(1,0,0,height+28) end
+        applyState()
     end,true)
+    connect(headerButton.MouseButton1Click,function()
+        if not alive() or not cardFrame.Parent then return end
+        UI.closePopup()
+        Session.Sections[key]=not Session.Sections[key]
+        applyState()
+        if Session.Sections[key] then measure() end
+    end,true)
+    Session.SectionButtons[key]=headerButton
+    applyState()
     return inner
 end
+
 local function displayRow(parent,left,right)
     local row=frame(parent,UDim2.new(1,0,0,40),nil)
     label(row,left,12,"muted",{Size=UDim2.new(.45,-6,1,0),TextWrapped=true})
@@ -391,11 +417,16 @@ function UI.navigation()
         b.TextXAlignment=Enum.TextXAlignment.Left;padding(b,10)
         UI.NavConnections[#UI.NavConnections+1]=b.MouseButton1Click:Connect(function()
             if not alive() then return end
-            UI.Group=UI.Group==section.id and nil or section.id;UI.navigation()
+            if UI.Group==section.id then
+                UI.Group=nil
+            else
+                UI.Group=section.id
+            end
+            UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"UI ONLY  •  P2",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"UI ONLY  •  P3",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 local function special(parent,name)
     if name=="overview" then
@@ -525,4 +556,5 @@ function Session.Cleanup()
     if G.__ZekioPremiumUI==Session then G.__ZekioPremiumUI=nil end
 end
 UI.layout();UI.show("overview")
+
 

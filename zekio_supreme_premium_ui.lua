@@ -1,4 +1,4 @@
--- Zekio Supreme Premium | UI ONLY P4
+-- Zekio Supreme Premium | UI ONLY P5
 -- Self-contained interface. Every feature action is an unconnected UI stub.
 -- No gameplay discovery, remotes, movement, item actions or key verification.
 local G = (getgenv and getgenv()) or _G
@@ -15,8 +15,8 @@ local UI = { Page = "overview", Group = "farming", Theme = "Gelap", Scale = 1, W
 local function alive() return not Session.Closed and G.__ZekioPremiumUI == Session end
 local V = Session.Values
 local COLORS = {
-    Gelap = { bg="16141E", side="111018", card="211E2B", input="191622", raised="2A2537", line="373040", text="F2EEF9", muted="B4A9C4", accent="AD89FF", soft="342548", onAccent="211331" },
-    Terang = { bg="F6F4FB", side="EEE9F6", card="FFFFFF", input="F8F6FC", raised="EDE7F5", line="DCD4E8", text="282035", muted="6E627F", accent="7846CB", soft="EBE0FD", onAccent="FFFFFF" },
+    Gelap = { bg="16141E", side="111018", card="211E2B", input="191622", raised="2A2537", line="373040", text="F2EEF9", muted="B4A9C4", accent="AD89FF", soft="342548", onAccent="211331", mainIcon="63D995", mainIconSelected="14532D" },
+    Terang = { bg="F6F4FB", side="EEE9F6", card="FFFFFF", input="F8F6FC", raised="EDE7F5", line="DCD4E8", text="282035", muted="6E627F", accent="7846CB", soft="EBE0FD", onAccent="FFFFFF", mainIcon="218048", mainIconSelected="CBFFD9" },
 }
 local function color(key) return Color3.fromHex(COLORS[UI.Theme][key]) end
 function UI.tint(instance, property, key)
@@ -124,11 +124,13 @@ function UI.icon(parent,name,x,y,size,token)
     return host
 end
 -- Visible labels are separate from decorative icons, keeping the whole row clickable.
-function UI.menuLabel(b,text,name,height,selected,hasArrow)
+function UI.menuLabel(b,text,name,height,selected,hasArrow,isMain)
     b.TextTransparency=1
     local token=selected and "onAccent" or "text"
-    UI.icon(b,name,10,(height-18)/2,18,selected and "onAccent" or "accent")
-    label(b,text,12,token,{Name="MenuTitle",Position=UDim2.fromOffset(36,0),Size=UDim2.new(1,hasArrow and -62 or -44,1,0),Font=Enum.Font.GothamBold,TextWrapped=true,Active=false})
+    local iconToken=selected and "onAccent" or "accent"
+    if isMain then iconToken=selected and "mainIconSelected" or "mainIcon" end
+    UI.icon(b,name,10,(height-18)/2,18,iconToken)
+    label(b,text,isMain and 14 or 12,token,{Name="MenuTitle",Position=UDim2.fromOffset(36,0),Size=UDim2.new(1,hasArrow and -62 or -44,1,0),Font=Enum.Font.GothamBold,TextWrapped=true,Active=false})
 end
 
 local function value(key, initial)
@@ -176,7 +178,7 @@ local PAGES = {
     settings={title="Setelan",subtitle="Sesuaikan tampilan Zekio Supreme Premium.",special="settings",groups={group("Tampilan",{s("ui.theme","Tema",{"Gelap","Terang"}),r("ui.scale","Ukuran UI",85,70,100,5,"%"),t("ui.notifications","Notifikasi UI","Tampilkan pesan dari tombol pratinjau.",true),info("Preferensi di pratinjau ini hanya tersimpan selama UI terbuka.")})}},
     stats={title="Statistik",subtitle="Ringkasan aktivitas setelah fitur dihubungkan.",special="stats"},
     key={title="Akun & Key",subtitle="Panel akses Zekio Supreme Premium.",special="key",action="Verifikasi key",groups={group("License key",{f("key.value","Key premium","Masukkan key premium"),info("Validasi key belum dihubungkan. Tidak ada key yang dikirim atau diverifikasi.")})}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P4.",groups={group("12 November 2026",{info("19 menu dengan ikon khusus, judul berikon, dan aksen ungu."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Sidebar dan bagian pengaturan dapat dibuka/tutup dengan tombol +/−."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • UI Build P5.",groups={group("12 November 2026",{info("19 menu dengan ikon khusus, judul berikon, dan aksen ungu."),info("Tombol, dropdown, slider, dan kolom input dapat dicoba."),info("Panel mendukung HP, dapat digeser dan dikecilkan."),info("Sidebar dan bagian pengaturan dapat dibuka/tutup dengan tombol +/−."),info("Build ini hanya UI. Seluruh aksi game belum dihubungkan.")})}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
@@ -186,7 +188,7 @@ local GROUPS={
     {id="system",title="Sistem",mark="S",pages={"settings","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM UI P4"
+Session.Build="PREMIUM UI P5"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -226,7 +228,7 @@ local content=make("ScrollingFrame",{Name="PageContent",BackgroundTransparency=1
 UI.tint(content,"ScrollBarImageColor3","accent")
 local footer=frame(window,UDim2.new(1,0,0,30),"side",{Position=UDim2.new(0,0,1,-30)})
 local footerText=label(footer,"Mode pratinjau • aksi game belum dihubungkan",11,"muted",{Position=UDim2.fromOffset(13,0),Size=UDim2.new(1,-55,1,0)})
-label(footer,"P4",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
+label(footer,"P5",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
 local shade=button(body,"",UDim2.fromScale(1,1),function() UI.drawer(false) end,false)
 shade.BackgroundTransparency=.35;shade.ZIndex=29;shade.Visible=false
 local bubble=button(root,"ZS",UDim2.fromOffset(54,54),function() window.Visible=true;UI.Bubble.Visible=false end,true)
@@ -467,7 +469,7 @@ function UI.navigation()
     local function navButton(text,id,groupId)
         local b=button(nav,text,UDim2.new(1,0,0,37),nil,UI.Page==id,false)
         b.Name="Nav_"..id
-        UI.menuLabel(b,PAGES[id].title,id,37,UI.Page==id,false)
+        UI.menuLabel(b,PAGES[id].title,id,37,UI.Page==id,false,id=="overview")
         UI.NavConnections[#UI.NavConnections+1]=b.MouseButton1Click:Connect(function() if alive() then UI.show(id,groupId) end end)
     end
     navButton("Ringkasan","overview")
@@ -476,7 +478,7 @@ function UI.navigation()
         local expanded=UI.Group==g.id
         local b=button(nav,g.title.."   "..(expanded and "−" or "+"),UDim2.new(1,0,0,39),nil,false,false)
         b.Name="NavGroup_"..g.id
-        UI.menuLabel(b,g.title,g.id,39,false,true)
+        UI.menuLabel(b,g.title,g.id,39,false,true,true)
         label(b,expanded and "−" or "+",16,"accent",{Name="GroupArrow",Position=UDim2.new(1,-22,0,0),Size=UDim2.fromOffset(12,39),TextXAlignment=Enum.TextXAlignment.Right,Active=false})
         UI.NavConnections[#UI.NavConnections+1]=b.MouseButton1Click:Connect(function()
             if not alive() then return end
@@ -489,7 +491,7 @@ function UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"UI ONLY  •  P4",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"UI ONLY  •  P5",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 local function special(parent,name)
     if name=="overview" then

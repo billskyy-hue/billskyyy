@@ -1,4 +1,4 @@
--- Zekio: diagnostik lokal roulette v2, bukan fitur penebak angka.
+-- Zekio: diagnostik lokal roulette v3, bukan fitur penebak angka.
 -- Tidak mengirim permintaan, pesan, webhook, atau data keluar.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -63,7 +63,7 @@ local function button(name, label, pos, size)
     make("UICorner", {CornerRadius=UDim.new(0,7)}, b)
     return b
 end
-text(panel, "Title", "Diagnostik Roda v2", UDim2.fromOffset(12,8), UDim2.new(1,-64,0,28), nil, 18)
+text(panel, "Title", "Diagnostik Roda v3", UDim2.fromOffset(12,8), UDim2.new(1,-64,0,28), nil, 18)
 local close = button("Close", "X", UDim2.new(1,-45,0,8), UDim2.fromOffset(33,28))
 local status = text(panel, "Status", "Menyiapkan pemantau...", UDim2.fromOffset(12,38), UDim2.new(1,-24,0,36), Color3.fromRGB(190,180,215), 12)
 local recordButton = button("Record", "MENYIAPKAN", UDim2.fromOffset(12,78), UDim2.new(.40,-16,0,36))
@@ -254,6 +254,9 @@ local function netNames()
                 if rawget(events,"WheelSpun") ~= nil and not session.netShape then
                     session.netShape = describeNet(value)
                 end
+                if type(rawget(events,"WheelSpun")) == "table" and not session.netWheel then
+                    session.netWheel = rawget(events,"WheelSpun")
+                end
                 for key in pairs(events) do
                     if type(key) == "string" and #key <= 60 and not seen[key] then
                         seen[key] = true; names[#names+1] = key
@@ -310,6 +313,63 @@ task.spawn(function()
     status.Text = remoteCount > 0 and ("Siap • " .. remoteCount .. " jalur. Tekan REKAM lalu pukul roda.")
         or "Tidak menemukan RemoteEvent. Hasil diagnostik mungkin kosong."
 end)
+
+-- Only report packet shapes and whether the descriptor's literal marker occurs.
+-- The marker and packet contents stay local and are never added to the report.
+local function currentWheelMarker()
+    local bridge = rawget(environment,"__ZekioWheelSpunBridgeV1")
+    local net = type(bridge) == "table" and rawget(bridge,"net") or nil
+    local events = type(net) == "table" and rawget(net,"EVENTS") or nil
+    local wheel = type(events) == "table" and rawget(events,"WheelSpun") or nil
+    if type(wheel) ~= "table" then wheel = session.netWheel end
+    local marker = type(wheel) == "table" and rawget(wheel,"packet") or nil
+    if type(marker) ~= "string" then return nil, "tidak tersedia" end
+    if #marker == 0 or #marker > 64 then return nil, "panjang di luar batas" end
+    return marker, tostring(#marker) .. "B"
+end
+local function packetContains(entry, marker)
+    if not marker then return nil end
+    for _, snap in ipairs(entry.buffers) do
+        for i=1,#snap.bytes-#marker+1 do
+            local same = true
+            for j=1,#marker do
+                if snap.bytes[i+j-1] ~= string.byte(marker,j) then same=false; break end
+            end
+            if same then return true end
+        end
+    end
+    return false
+end
+local function packetShape(entry, reference, marker)
+    local parts = {}
+    for i, kind in ipairs(entry.types) do
+        local size
+        for _, snap in ipairs(entry.buffers) do
+            if snap.arg == i then size=snap.length; break end
+        end
+        parts[#parts+1] = "arg" .. i .. "=" .. kind .. (size and ("(" .. size .. "B)") or "")
+    end
+    local match = packetContains(entry,marker)
+    local matchText = match == nil and "tidak dicek" or (match and "cocok literal" or "tidak cocok literal")
+    return string.format("%+.3fs R%d",entry.time-reference,entry.id) .. " "
+        .. (#parts > 0 and table.concat(parts, ", ") or "tanpa argumen") .. " | penanda=" .. matchText
+end
+local function compareShapes(first, candidate)
+    if not first or not candidate then return "Belum ada dua paket untuk dibandingkan." end
+    if first == candidate then return "Paket pertama juga paket kandidat; artinya belum diketahui." end
+    if first.id ~= candidate.id then return "Jalur paket pertama dan kandidat berbeda." end
+    for _, early in ipairs(first.buffers) do
+        for _, late in ipairs(candidate.buffers) do
+            if early.arg == late.arg and early.kind == late.kind then
+                local n, same = math.min(#early.bytes,#late.bytes), 0
+                for i=1,n do if early.bytes[i] == late.bytes[i] then same += 1 end end
+                return "Arg" .. early.arg .. ": " .. same .. "/" .. n
+                    .. " posisi byte sama (maks 256; bukan identifikasi event)."
+            end
+        end
+    end
+    return "Tidak ada argumen buffer/string yang sama untuk dibandingkan."
+end
 
 listen(recordButton.MouseButton1Click, function()
     if not session.ready or session.closed then return end
@@ -399,7 +459,7 @@ listen(analyseButton.MouseButton1Click, function()
         end
         if #bits > 0 then
             found[#found+1] = {time=entry.time-reference,
-                value="R" .. entry.id .. " " .. table.concat(bits," | ")}
+                value="R" .. entry.id .. " " .. table.concat(bits," | "), entry=entry}
         end
         end
     end
@@ -412,7 +472,8 @@ listen(analyseButton.MouseButton1Click, function()
         if #session.runs > 3 then table.remove(session.runs, 1) end
     end
     local bridge, shape = bridgeInfo()
-    local lines = {"ZEKIO DIAG RODA v2", "Angka terlihat: " .. expected,
+    local marker, markerStatus = currentWheelMarker()
+    local lines = {"ZEKIO DIAG RODA v3", "Angka terlihat: " .. expected,
         "Jalur ReplicatedStorage: " .. remoteCount .. "/" .. discoveredCount .. " | paket disimpan: " .. #session.records .. " | terlewat: " .. tostring(session.dropped or 0),
         "Sentuhan pertama: " .. (session.tapAt and string.format("%.3fs dari mulai rekam", session.tapAt) or "tidak terdeteksi"),
         "Waktu + dihitung dari sentuhan pertama; belum tentu pukulan."}
@@ -423,6 +484,20 @@ listen(analyseButton.MouseButton1Click, function()
     else
         lines[#lines+1] = "Paket pertama sesudah sentuhan: tidak teramati."
     end
+    lines[#lines+1] = "WheelSpun.packet: " .. markerStatus .. " (kecocokan literal belum membuktikan event)."
+    local shown = 0
+    for _, entry in ipairs(session.records) do
+        if not session.tapAt or entry.time >= session.tapAt then
+            shown += 1
+            if shown <= 4 then lines[#lines+1] = "Paket " .. shown .. ": " .. packetShape(entry, reference, marker) end
+        end
+    end
+    if shown > 4 then lines[#lines+1] = "Paket lainnya: " .. (shown-4) end
+    local candidateEntry = found[1] and found[1].entry or nil
+    if candidateEntry then
+        lines[#lines+1] = "Paket kandidat literal: " .. packetShape(candidateEntry, reference, marker)
+    end
+    lines[#lines+1] = "Banding awal/kandidat: " .. compareShapes(firstAfterTouch,candidateEntry)
     lines[#lines+1] = "P13: " .. bridge
     lines[#lines+1] = "Bentuk event: " .. tostring(shape or "masih diperiksa/tidak ditemukan")
     lines[#lines+1] = "Net.EVENTS: " .. tostring(session.netInfo or "masih diperiksa")
@@ -474,6 +549,13 @@ listen(analyseButton.MouseButton1Click, function()
     if #found == 0 then lines[#lines+1] = "Tidak ada kecocokan pada 256 byte awal / field hasil." end
     local used = {}
     if firstAfterTouch then used[firstAfterTouch.id] = true end
+    local shapeCount = 0
+    for _, entry in ipairs(session.records) do
+        if not session.tapAt or entry.time >= session.tapAt then
+            shapeCount += 1
+            if shapeCount <= 4 then used[entry.id] = true end
+        end
+    end
     for i=1,math.min(#found,14) do
         local id = found[i].value:match("^R(%d+)")
         if id then used[tonumber(id)] = true end

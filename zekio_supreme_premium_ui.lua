@@ -1,4 +1,4 @@
--- Zekio Supreme Premium P10 | startup and Farm repair
+-- Zekio Supreme Premium P11 | Proxy, startup and Farm repair
 -- The readable build avoids an extra, synchronous payload-unpacking step.
 local Boot = { Done = false, Stage = "Menyiapkan menu premium" }
 do
@@ -46,7 +46,7 @@ do
                 label.TextXAlignment, label.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
                 label.Parent = gui
             end
-            label.Text = "ZEKIO SUPREME PREMIUM P10\n" .. Boot.Stage:sub(1, 1300)
+            label.Text = "ZEKIO SUPREME PREMIUM P11\n" .. Boot.Stage:sub(1, 1300)
         end)
     end
     function Boot.Close()
@@ -65,7 +65,7 @@ end
 local Premium
 local uiOk, uiError = xpcall(function()
 Premium=(function()
--- Zekio Supreme Premium | P10 FULL
+-- Zekio Supreme Premium | P11 FULL
 -- Native premium UI with the r29 Farm repair.
 -- License provider is not configured in this build.
 local G = Boot.G
@@ -254,6 +254,7 @@ local PAGES = {
     growscan={title="Growscan",subtitle="Data item, block dan pohon dalam world.",nodes={}},
     inventory={title="Tas",subtitle="Inventori, trash item dan pembelian lock.",nodes={}},
     vending={title="Vending",subtitle="Isi stock dan kosongkan vending milikmu.",nodes={}},
+    proxy={title="Proxy",subtitle="Hasil roda dan Fast Pull melalui wrench.",nodes={}},
     title={title="Title",subtitle="OF LEGEND • tampilan nama di layar sendiri.",nodes={}},
     chat={title="Auto Chat",subtitle="Susun dan kirim pesan dengan interval pilihan.",nodes={}},
     bonus={title="Bonus",subtitle="Quest, redeem dan kode bonus.",nodes={}},
@@ -263,17 +264,18 @@ local PAGES = {
     discord={title="Discord",subtitle="Atur notifikasi webhook dan laporan statistik.",nodes={}},
     stats={title="Statistik",subtitle="Catatan hasil aktivitas sesi ini.",nodes={}},
     key={title="Akun & Key",subtitle="Informasi akun dan status konfigurasi lisensi.",nodes={}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • Build P10.",nodes={}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • Build P11.",nodes={}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
     {id="world",title="World",mark="W",pages={"drop","growscan"}},
     {id="items",title="Item",mark="I",pages={"inventory","vending"}},
+    {id="proxy",title="Proxy",mark="P",pages={"proxy"}},
     {id="tools",title="Utilitas",mark="U",pages={"title","chat","bonus","security"}},
     {id="system",title="Sistem",mark="S",pages={"settings","connection","discord","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM P10"
+Session.Build="PREMIUM P11"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -770,10 +772,163 @@ function Session.ApplyAppearance()
     UI.setTransparency(V["ui.transparency"])
     UI.theme(theme);UI.layout()
 end
+-- Proxy listens only while this premium session is active.
+do
+    local tab = builtin("proxy")
+    local wheel = { on = false, generation = 0, signals = {}, watched = {} }
+    local wheelInfo = tab:Paragraph({Title="Hasil roda", Desc="Menunggu hasil putaran milikmu..."})
+    local pullInfo = tab:Paragraph({Title="Status Fast Pull", Desc="Mati. Nyalakan setelah data game siap."})
+    function Session.SetProxyPullStatus(text)
+        if alive() then pcall(function() pullInfo:SetDesc(tostring(text)) end) end
+    end
+    local function disconnect(c)
+        if c then pcall(function() c:Disconnect() end) end
+    end
+    local function stopWheel()
+        wheel.on = false
+        wheel.generation = wheel.generation + 1
+        for _, c in ipairs(wheel.signals) do disconnect(c) end
+        table.clear(wheel.signals)
+        for node, entry in pairs(wheel.watched) do
+            disconnect(entry.changed); disconnect(entry.destroyed)
+            wheel.watched[node] = nil
+        end
+    end
+    local function trim(text)
+        return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+    end
+    local function endsWithActor(prefix, name)
+        if type(name) ~= "string" or name == "" then return false end
+        name = string.lower(name)
+        if #prefix < #name or prefix:sub(-#name) ~= name then return false end
+        local before = prefix:sub(#prefix - #name, #prefix - #name)
+        return before == "" or before:match("[%s%[%(%{:]") ~= nil
+    end
+    local function ownActor(prefix)
+        prefix = trim(prefix):gsub("[%]%)}:]+$", "")
+        if not endsWithActor(prefix, player.Name) and not endsWithActor(prefix, player.DisplayName) then return false end
+        -- Both usernames and display names can appear in the message. Do not
+        -- attribute it if another player could have the same displayed name.
+        local ok, players = pcall(Players.GetPlayers, Players)
+        if not ok then return false end
+        for _, p in ipairs(players) do
+            if p ~= player and (endsWithActor(prefix, p.Name) or endsWithActor(prefix, p.DisplayName)) then return false end
+        end
+        return true
+    end
+    local function readResult(raw)
+        if not wheel.on or not alive() or type(raw) ~= "string" then return end
+        local clean = raw:gsub("<[^>]+>", ""):gsub("`.", "")
+        clean = string.lower(clean)
+        local actor, number = clean:match("(.-)%s+spun%s+the%s+wheel%s+and%s+got%s+(%d+)")
+        if not actor or not number or not ownActor(actor) then return end
+        wheelInfo:SetDesc("Angka terakhir: " .. number .. "\nSumber: pesan hasil putaran")
+    end
+    local function watchText(node, readCurrent)
+        if not wheel.on or wheel.watched[node] then return end
+        local ok, valid = pcall(function()
+            return (node:IsA("TextLabel") or node:IsA("TextBox")) and not node:IsDescendantOf(gui)
+        end)
+        if not ok or not valid then return end
+        local entry = {}
+        wheel.watched[node] = entry
+        local connected, changed = pcall(function()
+            return node:GetPropertyChangedSignal("Text"):Connect(function() readResult(node.Text) end)
+        end)
+        if not connected then wheel.watched[node] = nil; return end
+        entry.changed = changed
+        local destroyedOK, destroyed = pcall(function()
+            return node.Destroying:Connect(function()
+                disconnect(entry.changed); disconnect(entry.destroyed); wheel.watched[node] = nil
+            end)
+        end)
+        if destroyedOK then entry.destroyed = destroyed end
+        if readCurrent then readResult(node.Text) end
+    end
+    local function watchRoot(root, generation)
+        if not root then return end
+        local ok, connection = pcall(function()
+            return root.DescendantAdded:Connect(function(node)
+                if wheel.on and wheel.generation == generation then watchText(node, true) end
+            end)
+        end)
+        if ok then table.insert(wheel.signals, connection) end
+        task.spawn(function()
+            local listOK, nodes = pcall(root.GetDescendants, root)
+            if not listOK then return end
+            for i, node in ipairs(nodes) do
+                if not alive() or not wheel.on or wheel.generation ~= generation then return end
+                watchText(node, false)
+                if i % 100 == 0 then task.wait() end
+            end
+        end)
+    end
+    local function startWheel()
+        stopWheel(); wheel.on = true
+        local generation = wheel.generation
+        wheelInfo:SetDesc("Menunggu hasil putaran milikmu...")
+        local ok, chat = pcall(game.GetService, game, "TextChatService")
+        if ok and chat then
+            local connected, connection = pcall(function()
+                return chat.MessageReceived:Connect(function(message)
+                    local textOK, messageText = pcall(function() return message.Text end)
+                    local prefixOK, prefix = pcall(function() return message.PrefixText end)
+                    if textOK then
+                        readResult(messageText)
+                        if prefixOK and type(prefix) == "string" then readResult(prefix .. " " .. tostring(messageText or "")) end
+                    end
+                end)
+            end)
+            if connected then table.insert(wheel.signals, connection) end
+        end
+        watchRoot(playerGui, generation)
+        if player.Character then watchRoot(player.Character, generation) end
+        local charOK, charConn = pcall(function()
+            return player.CharacterAdded:Connect(function(character)
+                if wheel.on and wheel.generation == generation then watchRoot(character, generation) end
+            end)
+        end)
+        if charOK then table.insert(wheel.signals, charConn) end
+    end
+    tab:Toggle({Title="Tampilkan angka otomatis", Desc="Membaca pesan hasil roda milikmu.", Value=true,
+        Callback=function(on)
+            if on then startWheel() else stopWheel(); wheelInfo:SetDesc("Pemantau dimatikan.") end
+        end})
+    local fastToggle, pullGeneration = nil, 0
+    fastToggle = tab:Toggle({Title="Fast Pull melalui wrench", Desc="Coba pull pemain yang di-wrench saat target dikenali.", Value=false,
+        Callback=function(on)
+            pullGeneration = pullGeneration + 1
+            local generation = pullGeneration
+            if not on then
+                if Session.ProxyStop then Session.ProxyStop() end
+                Session.SetProxyPullStatus("Fast Pull mati.")
+                return
+            end
+            if not Session.ProxyStart then
+                task.defer(function()
+                    if alive() and generation == pullGeneration then
+                        fastToggle:Set(false)
+                        Session.SetProxyPullStatus("Data game belum siap. Tunggu koneksi, lalu coba lagi.")
+                    end
+                end)
+                return
+            end
+            local ok, started, why = pcall(Session.ProxyStart)
+            if not ok or not started then
+                local message = ok and tostring(why or "Mekanisme wrench tidak tersedia.") or tostring(started)
+                task.defer(function()
+                    if alive() and generation == pullGeneration then fastToggle:Set(false); Session.SetProxyPullStatus(message) end
+                end)
+            end
+        end})
+    connect(gui.Destroying, stopWheel)
+    startWheel()
+end
+
 local account=builtin("key")
 account:Paragraph({Title="Akun",Desc=tostring(player.DisplayName or player.Name or "Pemain").."\nUsername: "..tostring(player.Name or "—").."\nUser ID: "..tostring(player.UserId or "—")})
 account:Paragraph({Title="Lisensi key",Desc="Sistem key belum dikonfigurasi. Build ini belum membatasi akses dengan key."})
-builtin("updates"):Paragraph({Title="Premium P10",Desc="Utilitas: title OF LEGEND dengan nama hijau dan ikon emas (lokal).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
+builtin("updates"):Paragraph({Title="Premium P11",Desc="Proxy: pembaca angka roda dan Fast Pull (percobaan).\nUtilitas: title OF LEGEND dengan nama hijau dan ikon emas (lokal).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
 
 Session.EngineUI={}
 function Session.EngineUI:CreateWindow()
@@ -825,7 +980,7 @@ function UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"PREMIUM  •  P10",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"PREMIUM  •  P11",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 function UI.show(id,groupId)
     if not alive() or not PAGES[id] then return end
@@ -935,7 +1090,7 @@ function Session.Cleanup()
 end
 UI.layout();UI.show("overview")
 
-Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-p10"
+Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-p11"
 return Session
 
 end)()
@@ -980,6 +1135,7 @@ function Session.GuiParent(fallback) return Premium.Gui.Parent or fallback end
 function Session.Report(message) pcall(Premium.SetBootStatus, tostring(message)) end
 function Session.CloseBoot() end
 function Session.ResetPartial()
+    if Premium.ProxyStop then pcall(Premium.ProxyStop) end
     if Session.RestoreNames then pcall(Session.RestoreNames) end
     if Session.UnbindInput then pcall(Session.UnbindInput) end
     for _,c in ipairs(Session.StartupConnections or {}) do pcall(function() c:Disconnect() end) end
@@ -2814,6 +2970,201 @@ local function findRefs()
     if not Refs.Inv and previousInv then Refs.Inv, Refs.InvSource = previousInv, previousSource end
     return Refs.World ~= nil
 end
+
+-- Fast Pull is adapted from the Fast Wrench implementation in anchhub_delta.lua.
+-- It never guesses a target or reports that the server accepted the command.
+do (function()
+    local fast = { active=false, generation=0, patches={}, slots={}, lastAt=0, lastUid=nil }
+    local getUp = (debug and debug.getupvalue) or getupvalue
+    local setUp = (debug and debug.setupvalue) or setupvalue
+    local constants = (debug and debug.getconstants) or getconstants
+
+    local function status(message)
+        if Premium.SetProxyPullStatus then Premium.SetProxyPullStatus(message) end
+    end
+    local function readUp(fn, index)
+        if type(getUp) ~= "function" then return false end
+        local ok, a, b = pcall(getUp, fn, index)
+        if not ok then return false end
+        if type(a) == "string" and b ~= nil then return true, b end
+        return true, a
+    end
+    local function restore()
+        fast.active = false
+        fast.generation = fast.generation + 1
+        for _, patch in ipairs(fast.patches) do
+            local ok, current = readUp(patch.fn, patch.index)
+            if ok and current == fast.wrapper then pcall(setUp, patch.fn, patch.index, patch.old) end
+        end
+        for _, slot in ipairs(fast.slots) do
+            if rawget(slot.owner, slot.key) == fast.wrapper then pcall(rawset, slot.owner, slot.key, slot.old) end
+        end
+        table.clear(fast.patches); table.clear(fast.slots)
+        fast.wrapper = nil
+        fast.lastAt, fast.lastUid = 0, nil
+    end
+    Premium.ProxyStop = restore
+
+    local function resolveTarget(argument)
+        local requested = tonumber(argument)
+        if type(argument) == "table" then
+            requested = tonumber(rawget(argument, "id") or rawget(argument, "pid") or rawget(argument, "userId"))
+        end
+        if not requested then return nil, nil, false end
+        local found, display, conflict = nil, nil, false
+        local function offer(uid, name)
+            uid = tonumber(uid)
+            if not uid or uid <= 0 or uid % 1 ~= 0 or uid == LocalPlayer.UserId then return end
+            if found and found ~= uid then conflict = true; return end
+            found, display = uid, tostring(name or uid):gsub("`.", "")
+        end
+        if type(argument) == "table" then offer(rawget(argument,"userId"), rawget(argument,"name")) end
+        local okPlayer, directPlayer = pcall(Players.GetPlayerByUserId, Players, requested)
+        if okPlayer and directPlayer then offer(directPlayer.UserId, directPlayer.Name) end
+        local others = Refs.Others
+        if others and type(rawget(others, "list")) == "function" then
+            local ok, list = pcall(rawget(others, "list"))
+            if ok and type(list) == "table" then
+                for key, item in pairs(list) do
+                    if type(item) == "table" then
+                        local uid = tonumber(rawget(item,"userId") or rawget(item,1))
+                        if tonumber(rawget(item,"id")) == requested
+                            or tonumber(rawget(item,"pid")) == requested or uid == requested then
+                            offer(uid, rawget(item,"name") or rawget(item,2))
+                        end
+                    end
+                end
+            end
+        end
+        -- The reference implementation finds selected player data in call-stack upvalues.
+        -- Only accept an entry that matches the requested id; do not choose a nearby or first player.
+        local playerDialog = false
+        local pending = {}
+        local menu = PlayerGui:FindFirstChild("MenuGui")
+        menu = menu and menu:FindFirstChild("Player")
+        if debug and type(debug.info) == "function" and type(getUp) == "function" then
+            for level = 2, 18 do
+                local ok, fn = pcall(debug.info, level, "f")
+                if not ok or type(fn) ~= "function" then break end
+                for index = 1, 30 do
+                    local got, value = readUp(fn, index)
+                    if not got then break end
+                    if type(value) == "table" then
+                        local uid = tonumber(rawget(value,"userId"))
+                        if uid and (tonumber(rawget(value,"id")) == requested
+                            or tonumber(rawget(value,"pid")) == requested or uid == requested) then
+                            pending[#pending+1] = {uid=uid, name=rawget(value,"name")}
+                        end
+                        local box = rawget(value,"box")
+                        if menu and typeof(box) == "Instance" and type(rawget(value,"close")) == "function" then
+                            local boxOK, belongs = pcall(function() return box == menu or box:IsDescendantOf(menu) end)
+                            if boxOK and belongs then playerDialog = true end
+                        end
+                    end
+                end
+            end
+        end
+        for _, candidate in ipairs(pending) do offer(candidate.uid, candidate.name) end
+        if conflict then return nil, nil, playerDialog end
+        return found, display, playerDialog
+    end
+
+    function Premium.ProxyStart()
+        restore()
+        if not alive() then return false, "Sesi game sudah ditutup." end
+        if not NetOk or type(Net) ~= "table" or type(rawget(Net,"call")) ~= "function" then
+            return false, "Net.call tidak tersedia. Hubungkan data game lalu coba lagi."
+        end
+        local original = rawget(Net,"call")
+        fast.active = true
+        local generation = fast.generation
+        local function wrapper(command, ...)
+            local target = select(1, ...)
+            if not fast.active or not alive() or fast.generation ~= generation then
+                return original(command, ...)
+            end
+            if command == "WrenchPlayer" or command == "GetPlayerLevel" or command == "PlayerInfo" then
+                local resolveOK, uid, name, inPlayerDialog = pcall(resolveTarget, target)
+                local wrenchEvent = command == "WrenchPlayer" or inPlayerDialog
+                if resolveOK and wrenchEvent and uid then
+                    local now = os.clock()
+                    if fast.lastUid == uid and now - fast.lastAt < 0.3 then return nil end
+                    fast.lastAt, fast.lastUid = now, uid
+                    task.spawn(function()
+                        if not fast.active or not alive() or fast.generation ~= generation then return end
+                        local ok, response = pcall(original, "WorldCommand", "pull", "#" .. tostring(uid))
+                        if not fast.active or fast.generation ~= generation then return end
+                        if not ok or response == false then
+                            status("Perintah pull gagal atau ditolak untuk " .. tostring(name) .. ".")
+                        else
+                            status("Perintah pull dikirim untuk " .. tostring(name) .. ". Hasil bergantung pada game.")
+                        end
+                    end)
+                    return nil
+                elseif command == "WrenchPlayer" then
+                    status("Target wrench belum dapat dipastikan; dialog game tetap dilanjutkan.")
+                end
+            end
+            return original(command, ...)
+        end
+        fast.wrapper = wrapper
+        local function patchSlot(owner, key)
+            if type(owner) ~= "table" or rawget(owner,key) ~= original then return end
+            local ok = pcall(rawset, owner, key, wrapper)
+            if ok and rawget(owner,key) == wrapper then
+                fast.slots[#fast.slots+1] = {owner=owner, key=key, old=original}
+            end
+        end
+        patchSlot(Net, "call")
+        patchSlot(Refs.World, "call")
+
+        -- Only patch a closure that explicitly contains the wrench command and
+        -- holds this exact Net.call as an upvalue. Avoid a global replacement.
+        if type(getgc) == "function" and type(constants) == "function"
+            and type(getUp) == "function" and type(setUp) == "function" then
+            local ok, objects = pcall(getgc, false)
+            if ok and type(objects) == "table" then
+                for n, fn in ipairs(objects) do
+                    if not fast.active or not alive() or fast.generation ~= generation then return false, "Fast Pull dibatalkan." end
+                    if type(fn) == "function" and fn ~= wrapper then
+                        local gameFn = true
+                        if type(isexecutorclosure) == "function" then
+                            local checkOK, isExec = pcall(isexecutorclosure, fn)
+                            if checkOK and isExec then gameFn = false end
+                        end
+                        if gameFn then
+                            local constOK, values = pcall(constants, fn)
+                            local isWrench = false
+                            if constOK and type(values) == "table" then
+                                for _, value in pairs(values) do if value == "WrenchPlayer" then isWrench = true; break end end
+                            end
+                            if isWrench then
+                                for index = 1, 30 do
+                                    local got, value = readUp(fn, index)
+                                    if not got then break end
+                                    if value == original then
+                                        local changed = pcall(setUp, fn, index, wrapper)
+                                        local verified, current = readUp(fn, index)
+                                        if changed and verified and current == wrapper then
+                                            fast.patches[#fast.patches+1] = {fn=fn,index=index,old=original}
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if n % 300 == 0 then task.wait() end
+                end
+            end
+        end
+        if #fast.slots == 0 and #fast.patches == 0 then
+            restore()
+            return false, "Pemantau wrench tidak dapat dipasang oleh executor."
+        end
+        status("Aktif. Gunakan wrench pada pemain; jika target tidak jelas, dialog normal tetap terbuka.")
+        return true
+    end
+end)() end
 
 local function refsText()
     return "World: " .. (Refs.World and "OK" or "TIDAK")
@@ -15009,6 +15360,7 @@ end)
 Session.Cleanup = function()
     if Session.Closed then return end
     Session.Closed=true
+    if Premium.ProxyStop then pcall(Premium.ProxyStop) end
     Session.CloseBoot()
     State.Running = false
     Clear.Running = false

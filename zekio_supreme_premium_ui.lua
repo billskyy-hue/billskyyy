@@ -1,4 +1,4 @@
--- Zekio Supreme Premium P12 | Proxy, startup and Farm repair
+-- Zekio Supreme Premium P13 | Proxy, startup and Farm repair
 -- The readable build avoids an extra, synchronous payload-unpacking step.
 local Boot = { Done = false, Stage = "Menyiapkan menu premium" }
 do
@@ -46,7 +46,7 @@ do
                 label.TextXAlignment, label.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
                 label.Parent = gui
             end
-            label.Text = "ZEKIO SUPREME PREMIUM P12\n" .. Boot.Stage:sub(1, 1300)
+            label.Text = "ZEKIO SUPREME PREMIUM P13\n" .. Boot.Stage:sub(1, 1300)
         end)
     end
     function Boot.Close()
@@ -65,7 +65,7 @@ end
 local Premium
 local uiOk, uiError = xpcall(function()
 Premium=(function()
--- Zekio Supreme Premium | P12 FULL
+-- Zekio Supreme Premium | P13 FULL
 -- Native premium UI with the r29 Farm repair.
 -- License provider is not configured in this build.
 local G = Boot.G
@@ -264,7 +264,7 @@ local PAGES = {
     discord={title="Discord",subtitle="Atur notifikasi webhook dan laporan statistik.",nodes={}},
     stats={title="Statistik",subtitle="Catatan hasil aktivitas sesi ini.",nodes={}},
     key={title="Akun & Key",subtitle="Informasi akun dan status konfigurasi lisensi.",nodes={}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • Build P12.",nodes={}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • Build P13.",nodes={}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
@@ -275,7 +275,7 @@ local GROUPS={
     {id="system",title="Sistem",mark="S",pages={"settings","connection","discord","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM P12"
+Session.Build="PREMIUM P13"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -316,7 +316,7 @@ UI.tint(content,"ScrollBarImageColor3","accent")
 local footer=frame(window,UDim2.new(1,0,0,30),"side",{Position=UDim2.new(0,0,1,-30)})
 UI.surface(footer,"sidebar")
 local footerText=label(footer,"Zekio Supreme Premium • Growblox",11,"muted",{Position=UDim2.fromOffset(13,0),Size=UDim2.new(1,-55,1,0)})
-label(footer,"P12",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
+label(footer,"P13",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
 local shade=button(body,"",UDim2.fromScale(1,1),function() UI.drawer(false) end,false)
 shade.BackgroundTransparency=.35;shade.ZIndex=29;shade.Visible=false
 local bubble=button(root,"ZS",UDim2.fromOffset(54,54),function() window.Visible=true;UI.Bubble.Visible=false end,true)
@@ -861,6 +861,116 @@ do
         end
         return showNumber(number, source), false
     end
+    function Session.SetWheelNetStatus(message)
+        if wheel.on and alive() then status(tostring(message)) end
+    end
+    -- Net.on("WheelSpun") is the game's decoded event; never infer a result
+    -- from a fixed byte position in a shared network packet.
+    function Session.ReceiveWheelSpun(...)
+        if not wheel.on or not alive() then return end
+        local args = table.pack(...)
+        local owners = {self=false, other=false}
+        local values, valueSet, seen = {}, {}, {}
+        local function addValue(value)
+            if type(value) == "string" and value:match("^%d+$") then value=tonumber(value) end
+            if type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value > 255 then return end
+            if not valueSet[value] then valueSet[value]=true; values[#values+1]=value end
+        end
+        local function owner(value)
+            if value == player then owners.self=true; return end
+            local ok, list = pcall(Players.GetPlayers, Players)
+            if not ok then return end
+            local selfMatch, otherMatch = false, false
+            for _, candidate in ipairs(list) do
+                local same = value == candidate
+                if type(value) == "number" then same = value == candidate.UserId end
+                if type(value) == "string" then
+                    local lower = string.lower(value)
+                    local numericId = value:match("^%d+$") and tonumber(value) or nil
+                    same = (numericId ~= nil and numericId == candidate.UserId)
+                        or lower == string.lower(candidate.Name or "") or lower == string.lower(candidate.DisplayName or "")
+                end
+                if same and candidate == player then selfMatch=true elseif same then otherMatch=true end
+            end
+            -- A shared display name is not enough to identify either player.
+            if selfMatch and not otherMatch then owners.self=true
+            elseif otherMatch and not selfMatch then owners.other=true end
+        end
+        local resultKeys = {"result", "Result", "number", "Number", "roll", "Roll", "outcome", "Outcome",
+            "wheelNumber", "WheelNumber", "wheelResult", "spinResult", "numberRolled"}
+        local ownerKeys = {"player", "Player", "userId", "UserId", "playerId", "PlayerId", "sender", "Sender", "username", "Username"}
+        local function inspect(value, depth)
+            if type(value) ~= "table" or seen[value] or depth > 2 then return end
+            seen[value]=true
+            for _, key in ipairs(ownerKeys) do
+                local item=rawget(value,key)
+                if item ~= nil then owner(item) end
+            end
+            for _, key in ipairs(resultKeys) do
+                local item=rawget(value,key)
+                if item ~= nil and type(item) ~= "table" then addValue(item) end
+            end
+            for _, key in ipairs({"data", "Data", "payload", "Payload", "value"}) do
+                local item=rawget(value,key)
+                if type(item) == "table" then inspect(item, depth+1) end
+            end
+        end
+        for i=1,math.min(args.n,8) do
+            local value=args[i]
+            if value == player then
+                owners.self=true
+            elseif type(value)=="table" then
+                inspect(value,0)
+            elseif type(value)=="string" or (type(value)=="number" and value>255) then
+                owner(value)
+            end
+        end
+        if owners.other then status("WheelSpun diterima untuk pemain lain."); return end
+        for i=1,math.min(args.n,8) do
+            local value=args[i]
+            if type(value) == "string" then
+                local matched=readResult(value, owners.self, "WheelSpun")
+                if matched then return end
+            end
+        end
+        if #values == 1 then
+            local source=owners.self and "event WheelSpun" or "event WheelSpun; pemilik belum diketahui"
+            showNumber(values[1], source)
+            return
+        end
+        if #values > 1 then status("WheelSpun diterima, tetapi beberapa angka berbeda perlu diperiksa."); return end
+        local scalars = {}
+        for i=1,math.min(args.n,8) do
+            local value=args[i]
+            if type(value)=="number" and value==math.floor(value) and value>=0 and value<=255
+                and value~=player.UserId then scalars[#scalars+1]=value end
+        end
+        if #scalars == 1 and (args.n == 1 or owners.self) then
+            wheelInfo:SetDesc("Kandidat angka event: " .. scalars[1] .. "\nPerlu dicocokkan dengan hasil game.")
+            wheelOverlay.Text="Roda?: " .. scalars[1]
+            wheelOverlay.Visible=true
+            status("WheelSpun mengirim satu angka; pemilik dan arti data belum dipastikan.")
+            return
+        end
+        local parts = {}
+        for i=1,math.min(args.n,4) do
+            local value=args[i]
+            if type(value) == "table" then
+                local keys={}
+                for k,v in pairs(value) do
+                    if type(k)=="string" and #k<=30 then keys[#keys+1]=k..":"..type(v) end
+                    if #keys>=6 then break end
+                end
+                table.sort(keys)
+                parts[#parts+1]="tabel("..table.concat(keys,",")..")"
+            elseif type(value) == "number" and value >= 0 and value <= 255 then
+                parts[#parts+1]="angka("..tostring(value)..")"
+            else
+                parts[#parts+1]=typeof(value)
+            end
+        end
+        status("WheelSpun diterima; format belum dikenali: " .. (#parts>0 and table.concat(parts," | ") or "tanpa data"))
+    end
     local function sameLocalName(text)
         local name = trim(normalise(text)):gsub("^[%[%({@%s]+", ""):gsub("[%]%)}>:%s]+$", "")
         return ownActor(name) and (name == normalise(player.Name or "") or name == normalise(player.DisplayName or ""))
@@ -1130,7 +1240,7 @@ end
 local account=builtin("key")
 account:Paragraph({Title="Akun",Desc=tostring(player.DisplayName or player.Name or "Pemain").."\nUsername: "..tostring(player.Name or "—").."\nUser ID: "..tostring(player.UserId or "—")})
 account:Paragraph({Title="Lisensi key",Desc="Sistem key belum dikonfigurasi. Build ini belum membatasi akses dengan key."})
-builtin("updates"):Paragraph({Title="Premium P12",Desc="Proxy: pembaca angka roda langsung dan Fast Pull (percobaan).\nUtilitas: title OF LEGEND dengan nama hijau dan ikon emas (lokal).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
+builtin("updates"):Paragraph({Title="Premium P13",Desc="Proxy: pembaca event WheelSpun dan Fast Pull (percobaan).\nUtilitas: title OF LEGEND dengan nama hijau dan ikon emas (lokal).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
 
 Session.EngineUI={}
 function Session.EngineUI:CreateWindow()
@@ -1182,7 +1292,7 @@ function UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"PREMIUM  •  P12",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"PREMIUM  •  P13",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 function UI.show(id,groupId)
     if not alive() or not PAGES[id] then return end
@@ -1293,7 +1403,7 @@ function Session.Cleanup()
 end
 UI.layout();UI.show("overview")
 
-Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-p12"
+Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-p13"
 return Session
 
 end)()
@@ -1338,6 +1448,10 @@ function Session.GuiParent(fallback) return Premium.Gui.Parent or fallback end
 function Session.Report(message) pcall(Premium.SetBootStatus, tostring(message)) end
 function Session.CloseBoot() end
 function Session.ResetPartial()
+    if Session.WheelBridge and Session.WheelBridge.sink == Session.WheelSink then
+        Session.WheelBridge.sink = nil
+        Session.WheelBridge.world = nil
+    end
     if Premium.ProxyStop then pcall(Premium.ProxyStop) end
     if Session.RestoreNames then pcall(Session.RestoreNames) end
     if Session.UnbindInput then pcall(Session.UnbindInput) end
@@ -3173,6 +3287,53 @@ local function findRefs()
     if not Refs.Inv and previousInv then Refs.Inv, Refs.InvSource = previousInv, previousSource end
     return Refs.World ~= nil
 end
+
+-- WHEEL_SPUN_BRIDGE_BEGIN
+-- Reuse one decoded listener if the premium UI is restarted. Some game
+-- versions do not return an unsubscribe handle from Net.on.
+local function bindWheelSpun()
+    if not NetOk or type(Net) ~= "table" or type(Net.on) ~= "function"
+        or type(Net.EVENTS) ~= "table" or Net.EVENTS.WheelSpun == nil then
+        if Premium.SetWheelNetStatus then Premium.SetWheelNetStatus("WheelSpun: jalur Net belum tersedia.") end
+        return false
+    end
+    local key = "__ZekioWheelSpunBridgeV1"
+    local bridge = rawget(G,key)
+    if type(bridge) ~= "table" or bridge.net ~= Net or bridge.bound ~= true then
+        if type(bridge) == "table" then bridge.sink=nil; bridge.world=nil end
+        bridge = {net=Net, bound=false}
+        local function dispatch(...)
+            local sink=bridge.sink
+            if type(sink)=="function" then pcall(sink,...) end
+        end
+        local function worldName()
+            local getter=bridge.world
+            if type(getter)~="function" then return "" end
+            local ok, name=pcall(getter)
+            return ok and name or ""
+        end
+        local ok, result = pcall(Net.on, "WheelSpun", dispatch, worldName)
+        if not ok or result == false then
+            if Premium.SetWheelNetStatus then Premium.SetWheelNetStatus("WheelSpun: gagal memasang pemantau event.") end
+            return false
+        end
+        bridge.bound=true
+        G[key]=bridge
+    end
+    local function sink(...)
+        if alive() and Premium.ReceiveWheelSpun then Premium.ReceiveWheelSpun(...) end
+    end
+    bridge.sink=sink
+    bridge.world=function()
+        local world=Refs.World
+        return world and rawget(world,"name") or ""
+    end
+    Session.WheelBridge, Session.WheelSink=bridge,sink
+    if Premium.SetWheelNetStatus then Premium.SetWheelNetStatus("WheelSpun terpasang. Pukul roda untuk membaca datanya.") end
+    return true
+end
+bindWheelSpun()
+-- WHEEL_SPUN_BRIDGE_END
 
 -- Fast Pull is adapted from the Fast Wrench implementation in anchhub_delta.lua.
 -- It never guesses a target or reports that the server accepted the command.
@@ -12039,7 +12200,7 @@ Session.Report("Menghubungkan kontrol premium")
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio Supreme",
     Icon = "sprout",
-    Author = "Premium P12 | engine r29",
+    Author = "Premium P13 | engine r29",
     Folder = "ZekioSupremePremium",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -15507,7 +15668,7 @@ end
 
 task.spawn(function()
     local ok, err = xpcall(function()
-        reconnect("Zekio Supreme Premium P12")
+        reconnect("Zekio Supreme Premium P13")
         if not alive() then return end
         Premium.ConnectionError = nil
         if Config.saved("Penjaga", "On") == true then

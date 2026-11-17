@@ -1,4 +1,4 @@
--- Zekio Supreme Premium P11 | Proxy, startup and Farm repair
+-- Zekio Supreme Premium P12 | Proxy, startup and Farm repair
 -- The readable build avoids an extra, synchronous payload-unpacking step.
 local Boot = { Done = false, Stage = "Menyiapkan menu premium" }
 do
@@ -46,7 +46,7 @@ do
                 label.TextXAlignment, label.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
                 label.Parent = gui
             end
-            label.Text = "ZEKIO SUPREME PREMIUM P11\n" .. Boot.Stage:sub(1, 1300)
+            label.Text = "ZEKIO SUPREME PREMIUM P12\n" .. Boot.Stage:sub(1, 1300)
         end)
     end
     function Boot.Close()
@@ -65,7 +65,7 @@ end
 local Premium
 local uiOk, uiError = xpcall(function()
 Premium=(function()
--- Zekio Supreme Premium | P11 FULL
+-- Zekio Supreme Premium | P12 FULL
 -- Native premium UI with the r29 Farm repair.
 -- License provider is not configured in this build.
 local G = Boot.G
@@ -264,7 +264,7 @@ local PAGES = {
     discord={title="Discord",subtitle="Atur notifikasi webhook dan laporan statistik.",nodes={}},
     stats={title="Statistik",subtitle="Catatan hasil aktivitas sesi ini.",nodes={}},
     key={title="Akun & Key",subtitle="Informasi akun dan status konfigurasi lisensi.",nodes={}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • Build P11.",nodes={}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • Build P12.",nodes={}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
@@ -275,7 +275,7 @@ local GROUPS={
     {id="system",title="Sistem",mark="S",pages={"settings","connection","discord","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM P11"
+Session.Build="PREMIUM P12"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -316,7 +316,7 @@ UI.tint(content,"ScrollBarImageColor3","accent")
 local footer=frame(window,UDim2.new(1,0,0,30),"side",{Position=UDim2.new(0,0,1,-30)})
 UI.surface(footer,"sidebar")
 local footerText=label(footer,"Zekio Supreme Premium • Growblox",11,"muted",{Position=UDim2.fromOffset(13,0),Size=UDim2.new(1,-55,1,0)})
-label(footer,"P10",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
+label(footer,"P12",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
 local shade=button(body,"",UDim2.fromScale(1,1),function() UI.drawer(false) end,false)
 shade.BackgroundTransparency=.35;shade.ZIndex=29;shade.Visible=false
 local bubble=button(root,"ZS",UDim2.fromOffset(54,54),function() window.Visible=true;UI.Bubble.Visible=false end,true)
@@ -775,8 +775,17 @@ end
 -- Proxy listens only while this premium session is active.
 do
     local tab = builtin("proxy")
-    local wheel = { on = false, generation = 0, signals = {}, watched = {} }
-    local wheelInfo = tab:Paragraph({Title="Hasil roda", Desc="Menunggu hasil putaran milikmu..."})
+    local wheel = { on = false, generation = 0, signals = {}, watched = {}, roots = {}, remotes = {} }
+    local wheelInfo = tab:Paragraph({Title="Hasil roda", Desc="Belum ada hasil yang terbaca."})
+    local wheelStatus = tab:Paragraph({Title="Status pembaca roda", Desc="Menyiapkan pemantau..."})
+    local wheelOverlay = label(root, "", 16, "text", {
+        Name="WheelResultOverlay", Visible=false, Size=UDim2.fromOffset(164,38),
+        AnchorPoint=Vector2.new(.5,0), Position=UDim2.new(.5,0,0,12),
+        Font=Enum.Font.GothamBold, TextXAlignment=Enum.TextXAlignment.Center,
+        BackgroundTransparency=.12, ZIndex=150,
+    })
+    UI.tint(wheelOverlay, "BackgroundColor3", "raised")
+    round(wheelOverlay, 9)
     local pullInfo = tab:Paragraph({Title="Status Fast Pull", Desc="Mati. Nyalakan setelah data game siap."})
     function Session.SetProxyPullStatus(text)
         if alive() then pcall(function() pullInfo:SetDesc(tostring(text)) end) end
@@ -787,28 +796,33 @@ do
     local function stopWheel()
         wheel.on = false
         wheel.generation = wheel.generation + 1
+        wheelOverlay.Visible = false
         for _, c in ipairs(wheel.signals) do disconnect(c) end
         table.clear(wheel.signals)
         for node, entry in pairs(wheel.watched) do
             disconnect(entry.changed); disconnect(entry.destroyed)
             wheel.watched[node] = nil
         end
+        table.clear(wheel.roots)
+        table.clear(wheel.remotes)
     end
+    Session.StopWheel = stopWheel
     local function trim(text)
         return (text:gsub("^%s+", ""):gsub("%s+$", ""))
     end
+    local function normalise(text)
+        return string.lower((text:gsub("<[^>]+>", ""):gsub("`.", ""):gsub("\194\160", " ")))
+    end
     local function endsWithActor(prefix, name)
         if type(name) ~= "string" or name == "" then return false end
-        name = string.lower(name)
+        name = normalise(name)
         if #prefix < #name or prefix:sub(-#name) ~= name then return false end
         local before = prefix:sub(#prefix - #name, #prefix - #name)
-        return before == "" or before:match("[%s%[%(%{:]") ~= nil
+        return before == "" or before:match("[%w_]") == nil
     end
     local function ownActor(prefix)
-        prefix = trim(prefix):gsub("[%]%)}:]+$", "")
+        prefix = trim(prefix):gsub("[%]%)}>:%!%.,;\"'%s]+$", "")
         if not endsWithActor(prefix, player.Name) and not endsWithActor(prefix, player.DisplayName) then return false end
-        -- Both usernames and display names can appear in the message. Do not
-        -- attribute it if another player could have the same displayed name.
         local ok, players = pcall(Players.GetPlayers, Players)
         if not ok then return false end
         for _, p in ipairs(players) do
@@ -816,83 +830,271 @@ do
         end
         return true
     end
-    local function readResult(raw)
-        if not wheel.on or not alive() or type(raw) ~= "string" then return end
-        local clean = raw:gsub("<[^>]+>", ""):gsub("`.", "")
-        clean = string.lower(clean)
-        local actor, number = clean:match("(.-)%s+spun%s+the%s+wheel%s+and%s+got%s+(%d+)")
-        if not actor or not number or not ownActor(actor) then return end
-        wheelInfo:SetDesc("Angka terakhir: " .. number .. "\nSumber: pesan hasil putaran")
+    local function status(text)
+        if wheel.on and alive() then pcall(function() wheelStatus:SetDesc(text) end) end
     end
-    local function watchText(node, readCurrent)
-        if not wheel.on or wheel.watched[node] then return end
+    local function showNumber(number, source)
+        local text = tostring(number)
+        if not text:match("^%d+$") or #text > 6 then return false end
+        wheelInfo:SetDesc("Angka terbaca: " .. text .. "\nSumber: " .. source)
+        wheelOverlay.Text = "Roda: " .. text
+        wheelOverlay.Visible = true
+        status("Aktif • hasil terdeteksi melalui " .. source .. ".")
+        return true
+    end
+    -- Only display a number sent or shown by the game. A prediction is never
+    -- substituted for a result that has not arrived yet.
+    local function readResult(raw, ownContext, source)
+        if not wheel.on or not alive() or type(raw) ~= "string" or #raw > 8192 then return false, false end
+        local clean = " " .. normalise(raw)
+        if not clean:find("wheel", 1, true) then return false, false end
+        local actor, number = clean:match("(.-)%s+spun%s+the%s+wheel%s+and%s+got%s*[:=!?%-]*%s*(%d+)")
+        if not number then
+            actor, number = clean:match("(.-)%s+spins?%s+the%s+wheel%s+and%s+gets?%s*[:=!?%-]*%s*(%d+)")
+        end
+        if not number then return false, false end
+        actor = trim(actor)
+        if actor == "" and not ownContext then return false, true end
+        if actor ~= "" and not ownActor(actor) then
+            status("Pesan roda terbaca, tetapi nama pemain tidak cocok atau tidak unik.")
+            return false, false
+        end
+        return showNumber(number, source), false
+    end
+    local function sameLocalName(text)
+        local name = trim(normalise(text)):gsub("^[%[%({@%s]+", ""):gsub("[%]%)}>:%s]+$", "")
+        return ownActor(name) and (name == normalise(player.Name or "") or name == normalise(player.DisplayName or ""))
+    end
+    local function siblingOwnName(node)
+        local ok, children = pcall(function() return node.Parent and node.Parent:GetChildren() or {} end)
+        if not ok then return false end
+        for i, peer in ipairs(children) do
+            if i > 32 then break end
+            if peer ~= node then
+                local textOK, text = pcall(function()
+                    if peer:IsA("TextLabel") or peer:IsA("TextButton") or peer:IsA("TextBox") then return peer.Text end
+                end)
+                if textOK and type(text) == "string" and sameLocalName(text) then return true end
+            end
+        end
+        return false
+    end
+    local function handleNode(node, source)
+        local ok, text, ownCharacter = pcall(function()
+            local character = player.Character
+            return node.Text, character ~= nil and node:IsDescendantOf(character)
+        end)
+        if not ok then return end
+        local matched, needsOwner = readResult(text, ownCharacter, source)
+        if not matched and needsOwner and siblingOwnName(node) then
+            readResult(text, true, source)
+        elseif needsOwner and not matched then
+            status("Pesan roda terbaca, tetapi pemilik hasil belum dapat dipastikan.")
+        end
+    end
+    local function watchText(node, readCurrent, source)
+        if not wheel.on or not alive() or wheel.watched[node] then return end
         local ok, valid = pcall(function()
-            return (node:IsA("TextLabel") or node:IsA("TextBox")) and not node:IsDescendantOf(gui)
+            return (node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox"))
+                and not node:IsDescendantOf(gui)
         end)
         if not ok or not valid then return end
         local entry = {}
+        local generation = wheel.generation
         wheel.watched[node] = entry
         local connected, changed = pcall(function()
-            return node:GetPropertyChangedSignal("Text"):Connect(function() readResult(node.Text) end)
+            return node:GetPropertyChangedSignal("Text"):Connect(function()
+                if wheel.generation == generation then handleNode(node, source) end
+            end)
         end)
         if not connected then wheel.watched[node] = nil; return end
         entry.changed = changed
         local destroyedOK, destroyed = pcall(function()
             return node.Destroying:Connect(function()
-                disconnect(entry.changed); disconnect(entry.destroyed); wheel.watched[node] = nil
+                disconnect(entry.changed); disconnect(entry.destroyed)
+                if wheel.watched[node] == entry then wheel.watched[node] = nil end
             end)
         end)
         if destroyedOK then entry.destroyed = destroyed end
-        if readCurrent then readResult(node.Text) end
+        if readCurrent then handleNode(node, source) end
     end
-    local function watchRoot(root, generation)
-        if not root then return end
+    local function watchRoot(container, generation, source)
+        if not container or wheel.roots[container] then return end
+        wheel.roots[container] = true
         local ok, connection = pcall(function()
-            return root.DescendantAdded:Connect(function(node)
-                if wheel.on and wheel.generation == generation then watchText(node, true) end
+            return container.DescendantAdded:Connect(function(node)
+                if wheel.on and alive() and wheel.generation == generation then watchText(node, true, source) end
             end)
         end)
         if ok then table.insert(wheel.signals, connection) end
         task.spawn(function()
-            local listOK, nodes = pcall(root.GetDescendants, root)
+            local listOK, nodes = pcall(container.GetDescendants, container)
             if not listOK then return end
             for i, node in ipairs(nodes) do
                 if not alive() or not wheel.on or wheel.generation ~= generation then return end
-                watchText(node, false)
+                -- Existing labels may contain a previous spin. Listen for their
+                -- next change instead of presenting old text as a new result.
+                watchText(node, false, source)
                 if i % 100 == 0 then task.wait() end
+            end
+        end)
+    end
+    local function watchWorld(container, generation)
+        if not container then return end
+        local function watchBillboard(instance, readCurrent)
+            local ok, nodes = pcall(instance.GetDescendants, instance)
+            if not ok then return end
+            for i, child in ipairs(nodes) do
+                if not alive() or not wheel.on or wheel.generation ~= generation or i > 200 then return end
+                watchText(child, readCurrent, "teks di world")
+            end
+        end
+        local ok, connection = pcall(function()
+            return container.DescendantAdded:Connect(function(node)
+                if not alive() or not wheel.on or wheel.generation ~= generation then return end
+                local isGuiOK, isGui = pcall(function() return node:IsA("BillboardGui") or node:IsA("SurfaceGui") end)
+                if isGuiOK and isGui then watchBillboard(node, true); return end
+                local valid, isWorldText = pcall(function()
+                    return (node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox"))
+                        and (node:FindFirstAncestorOfClass("BillboardGui") or node:FindFirstAncestorOfClass("SurfaceGui"))
+                end)
+                if valid and isWorldText then watchText(node, true, "teks di world") end
+            end)
+        end)
+        if ok then table.insert(wheel.signals, connection) end
+        -- Find reusable world billboards once, with a cap and frame yields.
+        -- Do not read their old text as a new spin.
+        task.spawn(function()
+            local rootsOK, stack = pcall(container.GetChildren, container)
+            if not rootsOK then return end
+            local visited = 0
+            while #stack > 0 and visited < 6000 do
+                if not alive() or not wheel.on or wheel.generation ~= generation then return end
+                local current = table.remove(stack)
+                visited += 1
+                local guiOK, isGui = pcall(function() return current:IsA("BillboardGui") or current:IsA("SurfaceGui") end)
+                if guiOK and isGui then
+                    watchBillboard(current, false)
+                else
+                    local childOK, children = pcall(current.GetChildren, current)
+                    if childOK then for _, child in ipairs(children) do stack[#stack + 1] = child end end
+                end
+                if visited % 150 == 0 then task.wait() end
+            end
+        end)
+    end
+    local function watchNetwork(container, generation)
+        if not container then return end
+        local names = {"wheel", "spin", "roulette", "chat", "message", "bubble", "announce", "notify", "system"}
+        local count = 0
+        local function watchRemote(remote)
+            if not alive() or not wheel.on or wheel.generation ~= generation or wheel.remotes[remote] or count >= 64 then return end
+            local ok, wanted, directResult = pcall(function()
+                if not remote:IsA("RemoteEvent") then return false end
+                local name = string.lower(remote.Name)
+                for _, term in ipairs(names) do
+                    if name:find(term, 1, true) then
+                        return true, name:find("wheel", 1, true) ~= nil
+                            or name:find("roulette", 1, true) ~= nil
+                    end
+                end
+                return false
+            end)
+            if not ok or not wanted then return end
+            local connected, connection = pcall(function()
+                return remote.OnClientEvent:Connect(function(...)
+                    if not alive() or not wheel.on or wheel.generation ~= generation then return end
+                    local args = table.pack(...)
+                    local own = false
+                    for i = 1, math.min(args.n, 12) do
+                        local value = args[i]
+                        if value == player then own = true end
+                        if type(value) == "table" then
+                            local who = rawget(value, "player") or rawget(value, "sender") or rawget(value, "userId") or rawget(value, "UserId")
+                            if who == player or who == player.UserId or who == player.Name then own = true end
+                        end
+                    end
+                    for i = 1, math.min(args.n, 12) do
+                        local value = args[i]
+                        if type(value) == "string" then
+                            readResult(value, own, "pesan game")
+                        elseif type(value) == "table" then
+                            for _, key in ipairs({"text", "Text", "message", "Message", "content", "msg"}) do
+                                local text = rawget(value, key)
+                                if type(text) == "string" then readResult(text, own, "pesan game") end
+                            end
+                            if own and directResult then
+                                for _, key in ipairs({"result", "Result", "number", "Number", "outcome"}) do
+                                    local result = rawget(value, key)
+                                    if type(result) == "number" or type(result) == "string" then
+                                        if showNumber(result, "hasil game") then break end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
+            end)
+            if connected then
+                wheel.remotes[remote] = true
+                count += 1
+                table.insert(wheel.signals, connection)
+            end
+        end
+        local ok, connection = pcall(function()
+            return container.DescendantAdded:Connect(watchRemote)
+        end)
+        if ok then table.insert(wheel.signals, connection) end
+        task.spawn(function()
+            local listOK, nodes = pcall(container.GetDescendants, container)
+            if not listOK then return end
+            for i, node in ipairs(nodes) do
+                if not alive() or not wheel.on or wheel.generation ~= generation then return end
+                watchRemote(node)
+                if i % 150 == 0 then task.wait() end
             end
         end)
     end
     local function startWheel()
         stopWheel(); wheel.on = true
         local generation = wheel.generation
-        wheelInfo:SetDesc("Menunggu hasil putaran milikmu...")
+        wheelInfo:SetDesc("Belum ada hasil yang terbaca.")
+        status("Aktif. Pukul roda; angka muncul saat pesan hasil diterima.")
         local ok, chat = pcall(game.GetService, game, "TextChatService")
         if ok and chat then
             local connected, connection = pcall(function()
                 return chat.MessageReceived:Connect(function(message)
                     local textOK, messageText = pcall(function() return message.Text end)
                     local prefixOK, prefix = pcall(function() return message.PrefixText end)
+                    local ownOK, own = pcall(function() return message.TextSource.UserId == player.UserId end)
                     if textOK then
-                        readResult(messageText)
-                        if prefixOK and type(prefix) == "string" then readResult(prefix .. " " .. tostring(messageText or "")) end
+                        local matched = readResult(messageText, ownOK and own, "chat game")
+                        if not matched and prefixOK and type(prefix) == "string" then
+                            readResult(prefix .. " " .. tostring(messageText or ""), ownOK and own, "chat game")
+                        end
                     end
                 end)
             end)
             if connected then table.insert(wheel.signals, connection) end
         end
-        watchRoot(playerGui, generation)
-        if player.Character then watchRoot(player.Character, generation) end
+        watchRoot(playerGui, generation, "tampilan game")
+        if player.Character then watchRoot(player.Character, generation, "karakter") end
+        local coreOK, coreGui = pcall(game.GetService, game, "CoreGui")
+        if coreOK and coreGui then watchRoot(coreGui, generation, "tampilan chat") end
+        local worldOK, world = pcall(game.GetService, game, "Workspace")
+        if worldOK and world then watchWorld(world, generation) end
+        local netOK, replicated = pcall(game.GetService, game, "ReplicatedStorage")
+        if netOK and replicated then watchNetwork(replicated, generation) end
         local charOK, charConn = pcall(function()
             return player.CharacterAdded:Connect(function(character)
-                if wheel.on and wheel.generation == generation then watchRoot(character, generation) end
+                if wheel.on and wheel.generation == generation then watchRoot(character, generation, "karakter") end
             end)
         end)
         if charOK then table.insert(wheel.signals, charConn) end
     end
-    tab:Toggle({Title="Tampilkan angka otomatis", Desc="Membaca pesan hasil roda milikmu.", Value=true,
+    tab:Toggle({Title="Tampilkan angka otomatis", Desc="Angka tampil segera setelah hasil game terbaca.", Value=true,
         Callback=function(on)
-            if on then startWheel() else stopWheel(); wheelInfo:SetDesc("Pemantau dimatikan.") end
+            if on then startWheel() else stopWheel(); wheelInfo:SetDesc("Pemantau dimatikan."); wheelStatus:SetDesc("Mati.") end
         end})
     local fastToggle, pullGeneration = nil, 0
     fastToggle = tab:Toggle({Title="Fast Pull melalui wrench", Desc="Coba pull pemain yang di-wrench saat target dikenali.", Value=false,
@@ -928,7 +1130,7 @@ end
 local account=builtin("key")
 account:Paragraph({Title="Akun",Desc=tostring(player.DisplayName or player.Name or "Pemain").."\nUsername: "..tostring(player.Name or "—").."\nUser ID: "..tostring(player.UserId or "—")})
 account:Paragraph({Title="Lisensi key",Desc="Sistem key belum dikonfigurasi. Build ini belum membatasi akses dengan key."})
-builtin("updates"):Paragraph({Title="Premium P11",Desc="Proxy: pembaca angka roda dan Fast Pull (percobaan).\nUtilitas: title OF LEGEND dengan nama hijau dan ikon emas (lokal).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
+builtin("updates"):Paragraph({Title="Premium P12",Desc="Proxy: pembaca angka roda langsung dan Fast Pull (percobaan).\nUtilitas: title OF LEGEND dengan nama hijau dan ikon emas (lokal).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
 
 Session.EngineUI={}
 function Session.EngineUI:CreateWindow()
@@ -980,7 +1182,7 @@ function UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"PREMIUM  •  P11",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"PREMIUM  •  P12",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 function UI.show(id,groupId)
     if not alive() or not PAGES[id] then return end
@@ -1078,6 +1280,7 @@ connect(Input.WindowFocusReleased,function() Session.ActiveSlider=nil;Session.Dr
 function Session.Cleanup()
     if Session.Closed then return end
     Session.CommitInputs()
+    if Session.StopWheel then pcall(Session.StopWheel) end
     Session.Closed=true;Session.ActiveSlider=nil;Session.Drag=nil
     UI.closePopup()
     if Session.EngineCleanup then pcall(Session.EngineCleanup) end
@@ -1090,7 +1293,7 @@ function Session.Cleanup()
 end
 UI.layout();UI.show("overview")
 
-Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-p11"
+Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-p12"
 return Session
 
 end)()
@@ -11836,7 +12039,7 @@ Session.Report("Menghubungkan kontrol premium")
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio Supreme",
     Icon = "sprout",
-    Author = "Premium P10 | engine r29",
+    Author = "Premium P12 | engine r29",
     Folder = "ZekioSupremePremium",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -15304,7 +15507,7 @@ end
 
 task.spawn(function()
     local ok, err = xpcall(function()
-        reconnect("Zekio Supreme Premium P10")
+        reconnect("Zekio Supreme Premium P12")
         if not alive() then return end
         Premium.ConnectionError = nil
         if Config.saved("Penjaga", "On") == true then

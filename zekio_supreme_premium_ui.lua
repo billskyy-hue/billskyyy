@@ -10243,6 +10243,38 @@ function Build.carveLayer(x, y, W)
     return nil
 end
 
+-- Titik awal sesuai posisi pintu: satu tile di bawah batu tepat di bawah spawn.
+function Build.spawnStart()
+    local w = Refs.World
+    local spawn = w and w.spawn
+    local x = spawn and tonumber(spawn.X)
+    local doorY = spawn and tonumber(spawn.Y)
+    if not x or not doorY or x % 1 ~= 0 or doorY % 1 ~= 0 then
+        return nil, "Posisi pintu world belum terbaca"
+    end
+    local y = doorY + 2
+    if x < 0 or x >= w.w or y < 0 or y + 1 >= w.h then
+        return nil, "Posisi tanah di bawah pintu berada di luar world"
+    end
+    local base = fgIdAt(x, doorY + 1)
+    local rock = ItemDB[base]
+    local rockName = rock and string.lower(tostring(rock.name or "")) or ""
+    if not rock or not rock.solid or (canBreak(base) and not rockName:find("bedrock", 1, true)) then
+        return nil, "Batu di bawah pintu belum dikenali; titik awal tidak digunakan"
+    end
+    local id = fgIdAt(x, y)
+    if id ~= 0 then
+        local item = ItemDB[id]
+        local name = item and string.lower(tostring(item.name or "")):gsub("<.->", ""):gsub("`.", "") or ""
+        if not item or not name:find("%f[%a]dirt%f[%A]") or not canBreak(id) then
+            return nil, "Tile di bawah batu bukan Dirt yang dapat digali"
+        end
+    end
+    local x0, x1 = math.min(Land.X0, Land.X1), math.max(Land.X0, Land.X1)
+    if x < x0 or x > x1 then return nil, "Posisi pintu di luar X awal dan X akhir Dirt Farm" end
+    return { x = x, y = y, idx = y * w.w + x }
+end
+
 -- Urutan gali seperti ular, dari atas ke bawah (hanya tile yang masih perlu digali):
 --   celah baris ke-1 kiri -> kanan, turun lewat lubang ujung kanan,
 --   celah baris ke-2 kanan -> kiri, turun lewat lubang ujung kiri, dst.
@@ -10544,6 +10576,38 @@ function Build.carveStep(P, list, live)
     releaseInput()
     if Build.lavaStep(P, live) then return "work" end
     local R = punchReach() - 0.08
+    local start = Build.StartTarget
+    if start then
+        if not Build.carveLayer(start.x, start.y, P.W) then
+            Build.StartTarget = nil
+        elseif skipped(Build.Skip, start.idx) then
+            Build.Status = "Menunggu untuk mencoba lagi tanah di bawah batu"
+            task.wait(0.5)
+            return "wait"
+        elseif not stateReaches(s, start.x, start.y, R) then
+            Build.Status = ("Menuju tanah di bawah batu (%d,%d)"):format(start.x, start.y)
+            local result = Build.goNear({ start }, math.min(punchReach(), buildReach()) - 0.35, nil, false)
+            if result == "nopath" then
+                Build.Status = "Belum ada jalan ke tanah di bawah batu"
+                task.wait(0.5)
+            end
+            return result == "nopath" and "wait" or result
+        else
+            local foot = floor(s.y + 0.01)
+            if start.y == foot and start.x >= floor(s.x - 0.3) and start.x <= floor(s.x + 0.3 - 0.0001) then
+                local fall = fallAfterBreak(s, start.x, foot)
+                if fall == nil or fall > 3 then
+                    Build.Status = "Posisi awal terlalu tinggi untuk digali dari sini"
+                    task.wait(0.5)
+                    return "wait"
+                end
+            end
+            Build.Status = ("Gali tanah pertama (%d,%d)"):format(start.x, start.y)
+            local result = Build.carveTile(start, live)
+            if result == "done" then Build.StartTarget = nil end
+            return "work"
+        end
+    end
     local now = os.clock()
     local route = Build.Route
     if not route or route.world ~= w or route.x0 ~= P.x0 or route.x1 ~= P.x1 or route.lastY ~= P.rows[P.K] then
@@ -11240,8 +11304,16 @@ function Build.start()
         err = "Kamu belum masuk world"
     elseif not (it and it.solid) then
         err = "Pilih block padat untuk Dirt Farm"
-    elseif #landRows() == 0 then
-        err = "Tidak ada baris yang muat (Y atas terlalu bawah). Berdiri di pojok kiri-ATAS Dirt Farm lalu tekan 'Pakai posisi karakter'"
+    end
+    local start
+    if not err then
+        start, err = Build.spawnStart()
+        if start then
+            -- Celah pertama adalah tile yang ditandai, lantainya satu tile di bawahnya.
+            Land.Y0 = start.y + 1
+            Land.Cache = nil
+            if #landRows() == 0 then err = "Tidak ada baris Dirt Farm yang muat di bawah batu" end
+        end
     end
     if err then
         notify("Bangun Dirt Farm", err, 4)
@@ -11263,6 +11335,7 @@ function Build.start()
     table.clear(Build.LavaSkip)
     table.clear(BadEdge)
     Build.Surface = nil -- dihitung ulang (permukaan tanah asli)
+    Build.StartTarget = start
     Build.Reserve = 0
     Build.Route, Build.ActivePlan, Build.NextPunchAt = nil, nil, nil
     Build.LavaCleared = 0

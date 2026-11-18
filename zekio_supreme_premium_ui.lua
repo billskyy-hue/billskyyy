@@ -3445,6 +3445,7 @@ local function refsText()
         .. "\nKontrol gerak: " .. tostring(AutoInput and AutoInput.status and AutoInput.status() or "belum diperiksa")
         .. "\nStartup: " .. tostring(Shared and Shared.Status or "-")
         .. "\nDeteksi inventori r2: " .. tostring(Refs.InvSource or Refs.InvScanInfo or "-")
+        .. (Refs.TreeScanError and ("\nPohon: " .. Refs.TreeScanError) or "")
         .. (Refs.InvError and ("\nInventori: " .. Refs.InvError) or "")
         .. (Refs.InvWatchErr and ("\nEvent inventori: " .. Refs.InvWatchErr) or "")
         .. (Refs.ScanErr and ("\nScan: " .. Refs.ScanErr) or "")
@@ -6977,6 +6978,7 @@ end
 -- Pohon siap kalau: waktu server >= waktu tanam + lama tumbuh (sama dengan game).
 -- Seed ditanam di tile kosong yang di bawahnya ada block.
 local function findTreeRefs()
+    if Auto.TreeScanBusy then return Refs.Trees ~= nil end
     Refs.Trees, Refs.TreeMode, Refs.TreeP = nil, nil, nil
     -- 1) cara utama (game v1159+): ikuti fungsi World.tileChanged -> fungsi simpan pohon.
     --    Tetap jalan walau world belum punya pohon (tabel kosong).
@@ -7005,8 +7007,20 @@ local function findTreeRefs()
             end
         end
     end
-    -- 3) cadangan: telusuri upvalue lebih dalam (butuh world yang sudah ada pohonnya)
+    -- 3) telusuri fungsi world dan handler yang tersedia.
     if Auto.findTreesDeep then pcall(Auto.findTreesDeep) end
+    if Refs.Trees then return true end
+    -- 4) cadangan: cocokkan tabel game dengan posisi pohon di world.
+    if Auto.findTreesGC and not Auto.TreeScanBusy then
+        local w, now = Refs.World, os.clock()
+        if Auto.TreeScanWorld ~= w or now >= (Auto.NextTreeGCScan or 0) then
+            Auto.TreeScanWorld, Auto.NextTreeGCScan = w, now + 60
+            Auto.TreeScanBusy = true
+            local ok, err = pcall(Auto.findTreesGC)
+            Auto.TreeScanBusy = false
+            if not ok then Refs.TreeScanError = tostring(err) end
+        end
+    end
     return Refs.Trees ~= nil
 end
 
@@ -7150,6 +7164,85 @@ function Auto.treeShape(t)
     end
     if good == 0 or bad > good then return nil end
     return mode, pk
+end
+
+-- Cari tabel pohon pada objek game. Kandidat harus cocok dengan koordinat
+-- pohon hidup dan waktu tanam yang masuk akal, bukan sekadar nama tabel.
+function Auto.findTreesGC()
+    local w = Refs.World
+    if not w or type(getgc) ~= "function" then return false end
+    local ok, objects = pcall(getgc, true)
+    if not ok or type(objects) ~= "table" then
+        Refs.TreeScanError = "Daftar objek game tidak dapat dibaca"
+        return false
+    end
+    local now = workspace:GetServerTimeNow()
+    local trees = {}
+    for y = 0, w.h - 1 do
+        local row = w.fg[y]
+        if type(row) == "table" then
+            for x = 0, w.w - 1 do
+                local id = row[x]
+                if id and ItemDB[id] and ItemDB[id].kind == "seed" then
+                    trees[#trees + 1] = { x = x, y = y }
+                    if #trees >= 16 then break end
+                end
+            end
+        end
+        if #trees >= 16 then break end
+    end
+    if #trees == 0 then
+        Refs.TreeScanError = "Tidak ada pohon untuk memeriksa data"
+        return false
+    end
+    local minMatch = math.min(2, #trees)
+    local validKey = { p = true, plantedAt = true, plantTime = true, planted = true, startTime = true }
+    local seen, examined, functionsChecked = {}, 0, 0
+    local function consider(t)
+        if type(t) ~= "table" or seen[t] or t == w or rawget(t, "fg") ~= nil then return false end
+        seen[t] = true
+        local shapeOk, mode, key = pcall(Auto.treeShape, t)
+        if not shapeOk or not mode or not validKey[key or "p"] then return false end
+        local matches = 0
+        for _, tree in ipairs(trees) do
+            local e
+            if mode == "idx" then
+                e = rawget(t, tree.y * w.w + tree.x)
+            elseif mode == "xy" then
+                e = rawget(t, tree.x .. "," .. tree.y)
+            elseif mode == "rows" then
+                local row = rawget(t, tree.y)
+                e = type(row) == "table" and rawget(row, tree.x) or nil
+            end
+            local planted = type(e) == "table" and rawget(e, key or "p") or e
+            if type(planted) == "number" and planted == planted
+                and planted <= now + 60 and planted >= now - 90 * 86400 then
+                matches += 1
+                if matches >= minMatch then
+                    if Refs.World ~= w or Refs.Trees then return false end
+                    Refs.Trees, Refs.TreeMode, Refs.TreeP = t, mode, key or "p"
+                    Refs.TreeScanError = nil
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    for _, obj in pairs(objects) do
+        if Refs.World ~= w or Refs.Trees then return Refs.Trees ~= nil end
+        if type(obj) == "table" and consider(obj) then return true end
+        if type(obj) == "function" and functionsChecked < 1500 and isGameFn(obj) then
+            functionsChecked += 1
+            for _, upvalue in pairs(getUpvalues(obj)) do
+                if type(upvalue) == "table" and consider(upvalue) then return true end
+            end
+        end
+        examined += 1
+        if examined % 400 == 0 then task.wait() end
+        if examined >= 100000 then break end
+    end
+    Refs.TreeScanError = "Data waktu pohon belum ditemukan"
+    return false
 end
 
 -- Cari data pohon lewat upvalue fungsi game (remote world, fungsi World, RunService, Net). Tanpa getgc.
@@ -15055,6 +15148,7 @@ local function reconnect(show)
     UI.checkInventory(true, true) -- langsung di thread ini (thread INIT / antrian UI), bukan thread tombol
     findDropRefs(true)
     Drops.LastError = nil
+    Auto.NextTreeGCScan = 0 -- tombol Hubungkan boleh memulai pencarian ulang
     Auto.findTreeRefs()
     table.clear(DropFailUntil)
     Anim.fn, Anim.idx = nil, nil

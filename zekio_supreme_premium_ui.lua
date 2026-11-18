@@ -1,4 +1,4 @@
--- Zekio Supreme Premium P13 | Proxy, startup and Farm repair
+-- Zekio Supreme Premium P15 | Proxy, startup and Farm repair
 -- The readable build avoids an extra, synchronous payload-unpacking step.
 local Boot = { Done = false, Stage = "Menyiapkan menu premium" }
 do
@@ -46,7 +46,7 @@ do
                 label.TextXAlignment, label.TextYAlignment = Enum.TextXAlignment.Left, Enum.TextYAlignment.Top
                 label.Parent = gui
             end
-            label.Text = "ZEKIO SUPREME PREMIUM P13\n" .. Boot.Stage:sub(1, 1300)
+            label.Text = "ZEKIO SUPREME PREMIUM P15\n" .. Boot.Stage:sub(1, 1300)
         end)
     end
     function Boot.Close()
@@ -65,7 +65,7 @@ end
 local Premium
 local uiOk, uiError = xpcall(function()
 Premium=(function()
--- Zekio Supreme Premium | P13 FULL
+-- Zekio Supreme Premium | P15 FULL
 -- Native premium UI with the r29 Farm repair.
 -- License provider is not configured in this build.
 local G = Boot.G
@@ -190,7 +190,7 @@ local MENU_ICONS={
 }
 MENU_ICONS.connection={paths={{7,2,7,7},{17,2,17,7},{5,7,19,7,19,12,16,16,8,16,5,12,5,7},{12,16,12,22}}}
 MENU_ICONS.discord={paths={{4,17,6,14,6,9,8,5,12,3,16,5,18,9,18,14,20,17,4,17},{9,21,15,21}}}
-MENU_ICONS.title={paths={{3,7,7,11,12,3,17,11,21,7,19,19,5,19,3,7},{6,22,18,22}}}
+
 local ICON_ALIASES={farming="farmer",items="inventory",system="settings"}
 function UI.icon(parent,name,x,y,size,token)
     local key=ICON_ALIASES[name] or name
@@ -255,7 +255,6 @@ local PAGES = {
     inventory={title="Tas",subtitle="Inventori, trash item dan pembelian lock.",nodes={}},
     vending={title="Vending",subtitle="Isi stock dan kosongkan vending milikmu.",nodes={}},
     proxy={title="Proxy",subtitle="Hasil roda dan Fast Pull melalui wrench.",nodes={}},
-    title={title="Title",subtitle="OF LEGEND • tampilan nama di layar sendiri.",nodes={}},
     chat={title="Auto Chat",subtitle="Susun dan kirim pesan dengan interval pilihan.",nodes={}},
     bonus={title="Bonus",subtitle="Quest, redeem dan kode bonus.",nodes={}},
     security={title="Keamanan",subtitle="Penjaga dan pengaturan respons sesi.",nodes={}},
@@ -264,18 +263,18 @@ local PAGES = {
     discord={title="Discord",subtitle="Atur notifikasi webhook dan laporan statistik.",nodes={}},
     stats={title="Statistik",subtitle="Catatan hasil aktivitas sesi ini.",nodes={}},
     key={title="Akun & Key",subtitle="Informasi akun dan status konfigurasi lisensi.",nodes={}},
-    updates={title="Update",subtitle="Zekio Supreme Premium • Build P13.",nodes={}},
+    updates={title="Update",subtitle="Zekio Supreme Premium • Build P15.",nodes={}},
 }
 local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
     {id="world",title="World",mark="W",pages={"drop","growscan"}},
     {id="items",title="Item",mark="I",pages={"inventory","vending"}},
     {id="proxy",title="Proxy",mark="P",pages={"proxy"}},
-    {id="tools",title="Utilitas",mark="U",pages={"title","chat","bonus","security"}},
+    {id="tools",title="Utilitas",mark="U",pages={"chat","bonus","security"}},
     {id="system",title="Sistem",mark="S",pages={"settings","connection","discord","stats","key","updates"}},
 }
 Session.Pages=PAGES
-Session.Build="PREMIUM P13"
+Session.Build="PREMIUM P15"
 Session.MenuCount=0
 for _ in pairs(PAGES) do Session.MenuCount=Session.MenuCount+1 end
 
@@ -316,7 +315,7 @@ UI.tint(content,"ScrollBarImageColor3","accent")
 local footer=frame(window,UDim2.new(1,0,0,30),"side",{Position=UDim2.new(0,0,1,-30)})
 UI.surface(footer,"sidebar")
 local footerText=label(footer,"Zekio Supreme Premium • Growblox",11,"muted",{Position=UDim2.fromOffset(13,0),Size=UDim2.new(1,-55,1,0)})
-label(footer,"P13",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
+label(footer,"P15",11,"accent",{Position=UDim2.new(1,-38,0,0),Size=UDim2.fromOffset(25,30),TextXAlignment=Enum.TextXAlignment.Right})
 local shade=button(body,"",UDim2.fromScale(1,1),function() UI.drawer(false) end,false)
 shade.BackgroundTransparency=.35;shade.ZIndex=29;shade.Visible=false
 local bubble=button(root,"ZS",UDim2.fromOffset(54,54),function() window.Visible=true;UI.Bubble.Visible=false end,true)
@@ -468,7 +467,7 @@ Session.Mounted={}
 Session.RegistrationErrors={}
 local route={Farm="farm",Farmer="farmer",Pabrik="pabrik",["Dirt Farm"]="dirt",["Clear World"]="clear",Splice="splice",
     ["Titik Drop"]="drop",Growscan="growscan",Tas="inventory",Vending="vending",["Auto Chat"]="chat",Bonus="bonus",
-    Penjaga="security",Pengaturan="settings",Statistik="stats",Koneksi="connection",Discord="discord",Title="title"}
+    Penjaga="security",Pengaturan="settings",Statistik="stats",Koneksi="connection",Discord="discord"}
 local function copyValue(v)
     return type(v)=="table" and table.clone(v) or v
 end
@@ -775,12 +774,31 @@ end
 -- Proxy listens only while this premium session is active.
 do
     local tab = builtin("proxy")
-    local wheel = { on = false, generation = 0, signals = {}, watched = {}, roots = {}, remotes = {} }
+    local wheel = { resultUntil = 0, on = false, generation = 0, signals = {}, watched = {}, roots = {}, remotes = {} }
     local wheelInfo = tab:Paragraph({Title="Hasil roda", Desc="Belum ada hasil yang terbaca."})
     local wheelStatus = tab:Paragraph({Title="Status pembaca roda", Desc="Menyiapkan pemantau..."})
-    local wheelOverlay = label(root, "", 16, "text", {
+    -- Immediate display pattern adapted from xSkriptx/Skript-Growtopia-Proxy:
+    -- src/extension/parser/parser_impl.hpp, OnTalkBubble instant_roulette_spin.
+    -- GrowBlox uses its own decoder and GUI. Runtime compatibility is unverified.
+    local bridgeKey = "__ZekioPremiumWheelDecodeV2"
+    local bridge = rawget(G, bridgeKey)
+    if type(bridge) ~= "table" then
+        bridge = {entries = {}}
+        G[bridgeKey] = bridge
+    end
+    local layer = Instance.new("ScreenGui")
+    layer.Name = "ZekioWheelResultLayer"
+    layer.ResetOnSpawn = false
+    layer.IgnoreGuiInset = true
+    layer.DisplayOrder = gui.DisplayOrder + 1
+    layer.Parent = gui.Parent
+    local viewport = Instance.new("Frame")
+    viewport.BackgroundTransparency = 1
+    viewport.Size = UDim2.fromScale(1, 1)
+    viewport.Parent = layer
+    local wheelOverlay = label(viewport, "", 16, "text", {
         Name="WheelResultOverlay", Visible=false, Size=UDim2.fromOffset(164,38),
-        AnchorPoint=Vector2.new(.5,0), Position=UDim2.new(.5,0,0,12),
+        AnchorPoint=Vector2.new(.5,1), Position=UDim2.new(.5,0,0,12),
         Font=Enum.Font.GothamBold, TextXAlignment=Enum.TextXAlignment.Center,
         BackgroundTransparency=.12, ZIndex=150,
     })
@@ -795,6 +813,14 @@ do
     end
     local function stopWheel()
         wheel.on = false
+        wheel.resultUntil = 0
+        if bridge.sink == wheel.sink then bridge.sink = nil end
+        for descriptor, entry in pairs(bridge.entries) do
+            if entry.mode == "table" and rawget(descriptor, "unpack") == entry.wrapper then
+                local ok = pcall(function() descriptor.unpack = entry.original end)
+                if ok then bridge.entries[descriptor] = nil end
+            end
+        end
         wheel.generation = wheel.generation + 1
         wheelOverlay.Visible = false
         for _, c in ipairs(wheel.signals) do disconnect(c) end
@@ -807,400 +833,262 @@ do
         table.clear(wheel.remotes)
     end
     Session.StopWheel = stopWheel
-    local function trim(text)
-        return (text:gsub("^%s+", ""):gsub("%s+$", ""))
-    end
-    local function normalise(text)
-        return string.lower((text:gsub("<[^>]+>", ""):gsub("`.", ""):gsub("\194\160", " ")))
-    end
-    local function endsWithActor(prefix, name)
-        if type(name) ~= "string" or name == "" then return false end
-        name = normalise(name)
-        if #prefix < #name or prefix:sub(-#name) ~= name then return false end
-        local before = prefix:sub(#prefix - #name, #prefix - #name)
-        return before == "" or before:match("[%w_]") == nil
-    end
-    local function ownActor(prefix)
-        prefix = trim(prefix):gsub("[%]%)}>:%!%.,;\"'%s]+$", "")
-        if not endsWithActor(prefix, player.Name) and not endsWithActor(prefix, player.DisplayName) then return false end
-        local ok, players = pcall(Players.GetPlayers, Players)
-        if not ok then return false end
-        for _, p in ipairs(players) do
-            if p ~= player and (endsWithActor(prefix, p.Name) or endsWithActor(prefix, p.DisplayName)) then return false end
+local function clean(value)
+    return (value:gsub("<[^>]*>", ""):gsub("`.", "")):lower()
+end
+
+local function parseResult(args, player)
+    local numbers, owners, visited = {}, {}, {}
+    local budget = 80
+    local function number(value)
+        if type(value) == "string" and value:match("^%d+$") then value = tonumber(value) end
+        if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 36 then
+            numbers[value] = true
         end
-        return true
     end
+    local function owner(value)
+        if value == player then owners.self = true; return end
+        if type(value) == "number" then
+            owners[value == player.UserId and "self" or "other"] = true
+        elseif type(value) == "string" then
+            local v = clean(value)
+            if v == player.Name:lower() or v == tostring(player.UserId) then
+                owners.self = true
+            elseif type(player.DisplayName) == "string" and v == clean(player.DisplayName) then
+                local ok, list = pcall(Players.GetPlayers, Players)
+                if ok then
+                    local unique = true
+                    for _, other in ipairs(list) do
+                        if other ~= player and (v == clean(other.Name or "")
+                            or v == clean(other.DisplayName or "")) then
+                            unique = false
+                            break
+                        end
+                    end
+                    if unique then owners.self = true end
+                end
+            else
+                owners.other = true
+            end
+        end
+    end
+    local resultKeys = {"result", "Result", "number", "Number", "roll", "Roll", "outcome", "Outcome",
+        "wheelNumber", "WheelNumber", "wheelResult", "spinResult", "numberRolled"}
+    local ownerKeys = {"player", "Player", "userId", "UserId", "playerId", "PlayerId", "sender", "Sender", "username", "Username"}
+    local function visit(value, depth)
+        budget -= 1
+        if budget < 0 or depth > 3 then return end
+        if type(value) == "string" and #value <= 2048 then
+            local text = clean(value):match("^%s*(.-)%s*$")
+            -- Whole system-style phrase only. Do not accept embedded player chat.
+            local who, n = text:match("^%[?(.-)%]?%s+spun%s+the%s+wheel%s+and%s+got%s*[:=]?%s*(%d+)[!%]%s%.]*$")
+            if who then
+                owner((who:match("^%s*(.-)%s*$")))
+                number(n)
+            end
+        elseif type(value) == "table" and not visited[value] then
+            visited[value] = true
+            for _, key in ipairs(ownerKeys) do
+                local v = rawget(value, key)
+                if v ~= nil then owner(v) end
+            end
+            for _, key in ipairs(resultKeys) do number(rawget(value, key)) end
+            for _, key in ipairs({"data", "Data", "payload", "Payload", "message", "Message", "text", "Text"}) do
+                local v = rawget(value, key)
+                if v ~= nil then visit(v, depth + 1) end
+            end
+        end
+    end
+    for i = 1, math.min(args.n, 12) do
+        local value = args[i]
+        if value == player then owner(value) end
+        visit(value, 0)
+    end
+    local found, count = nil, 0
+    for n in pairs(numbers) do found = n; count += 1 end
+    if owners.other then return nil, "Hasil pemain lain atau identitas bertentangan." end
+    if count ~= 1 then return nil, "Data WheelSpun diterima; format hasil belum dikenali dengan pasti." end
+    if not owners.self then return nil, "Angka terbaca, tetapi pemain pemilik hasil belum dikenali." end
+    return found
+end
+
+local function makeObserver(original, bridge)
+    return function(...)
+        -- Original errors, argument order and ALL return values (including nils)
+        -- are preserved. Never call the decoder twice or fabricate its inputs.
+        local output = table.pack(original(...))
+        if bridge.sink then pcall(bridge.sink, output, "WheelSpun.unpack") end
+        return table.unpack(output, 1, output.n)
+    end
+end
+
+local target, nextTargetScan = nil, 0
+local function resolveTarget()
+    if target and target.Parent and os.clock() < nextTargetScan then return target end
+    if os.clock() < nextTargetScan then return nil end
+    nextTargetScan = os.clock() + .5
+    target = nil
+    local gameGui = playerGui:FindFirstChild("GameGui")
+    local world = gameGui and gameGui:FindFirstChild("World")
+    local camera = world and world:FindFirstChild("Camera")
+    -- These paths come from the existing GrowBlox Zekio UI. Do not select an
+    -- arbitrary other player's nametag or put another player's spin above us.
+    local view = camera and camera:FindFirstChild("PlayerView")
+    local tag = camera and camera:FindFirstChild("NameTag")
+    if not tag and view then tag = view:FindFirstChild("NameTag", true) end
+    local candidate = tag or view
+    if candidate and candidate:IsA("GuiObject") then target = candidate end
+    return target
+end
+local function draw()
+    if not wheel.on or not alive() or os.clock() >= wheel.resultUntil then wheelOverlay.Visible = false; return end
+    local object = resolveTarget()
+    if not object then wheelOverlay.Visible = false; return end
+    local current = object
+    while current and current ~= playerGui do
+        if (current:IsA("GuiObject") and not current.Visible)
+            or (current:IsA("ScreenGui") and not current.Enabled) then wheelOverlay.Visible = false; return end
+        current = current.Parent
+    end
+    local p, s, base = object.AbsolutePosition, object.AbsoluteSize, viewport.AbsolutePosition
+    if s.X <= 0 or s.Y <= 0 then wheelOverlay.Visible = false; return end
+    wheelOverlay.Position = UDim2.fromOffset(p.X + s.X / 2 - base.X, p.Y - base.Y - 8)
+    wheelOverlay.Visible = true
+end
+local function install(network)
+    local objects = {}
+    local scanned = false
+    if type(getgc) == "function" then
+        local ok, found = pcall(getgc, true)
+        if ok and type(found) == "table" then
+            objects = found
+            scanned = true
+        end
+    end
+    if type(network) == "table" then
+        objects = table.clone(objects)
+        objects[#objects + 1] = network
+        local events = rawget(network, "EVENTS")
+        if type(events) == "table" then
+            objects[#objects + 1] = events
+            for _, descriptor in pairs(events) do
+                if type(descriptor) == "table" then objects[#objects + 1] = descriptor end
+            end
+        end
+    end
+    if #objects == 0 then return false, "Decoder roda belum ditemukan." end
+    local descriptors, usage = {}, {}
+    for _, obj in ipairs(objects) do
+        if type(obj) == "table" then
+            local events = rawget(obj, "EVENTS")
+            local wheel = rawget(obj, "WheelSpun")
+            if type(events) == "table" then wheel = rawget(events, "WheelSpun") or wheel end
+            if type(wheel) == "table" and type(rawget(wheel, "unpack")) == "function" then descriptors[wheel] = true end
+            local unpacker = rawget(obj, "unpack")
+            if type(unpacker) == "function" and rawget(obj, "packet") ~= nil then
+                usage[unpacker] = usage[unpacker] or {}
+                usage[unpacker][obj] = true
+            end
+        end
+    end
+    local count = 0
+    for descriptor in pairs(descriptors) do
+        if not bridge.entries[descriptor] then
+            local original = rawget(descriptor, "unpack")
+            local shared = false
+            for other in pairs(usage[original] or {}) do if other ~= descriptor then shared = true end end
+            local entry = { original = original }
+            -- A shared decoder cannot be globally attributed to WheelSpun.
+            -- In that case observe only this descriptor's table entry.
+            if scanned and not shared and type(hookfunction) == "function" then
+                local old = original
+                local wrapper = makeObserver(function(...) return old(...) end, bridge)
+                local hooked, saved = pcall(hookfunction, original, wrapper)
+                if hooked and type(saved) == "function" then
+                    old = saved
+                    entry.original, entry.wrapper, entry.mode = saved, wrapper, "function"
+                end
+            end
+            if not entry.mode then
+                entry.wrapper = makeObserver(original, bridge)
+                local replaced = pcall(function() descriptor.unpack = entry.wrapper end)
+                if replaced and rawget(descriptor, "unpack") == entry.wrapper then entry.mode = "table" end
+            end
+            if entry.mode then bridge.entries[descriptor] = entry end
+        end
+        if bridge.entries[descriptor] then count += 1 end
+    end
+    if count == 0 then return false, "WheelSpun.unpack belum ditemukan atau belum bisa dipasang." end
+    return true, "Pengamat decoder dipasang; menunggu pemanggilan game. Belum ada hasil."
+end
+
     local function status(text)
-        if wheel.on and alive() then pcall(function() wheelStatus:SetDesc(text) end) end
+        if wheel.on and alive() then wheelStatus:SetDesc(text) end
     end
-    local function showNumber(number, source)
-        local text = tostring(number)
-        if not text:match("^%d+$") or #text > 6 then return false end
-        wheelInfo:SetDesc("Angka terbaca: " .. text .. "\nSumber: " .. source)
-        wheelOverlay.Text = "Roda: " .. text
-        wheelOverlay.Visible = true
-        status("Aktif • hasil terdeteksi melalui " .. source .. ".")
-        return true
+    wheel.sink = function(output, source)
+        if not wheel.on or not alive() then return end
+        local number, reason = parseResult(output, player)
+        if number == nil then
+            status(reason)
+            return
+        end
+        wheelInfo:SetDesc("Angka terbaca: " .. number .. "\nSumber: " .. (source or "WheelSpun"))
+        wheelOverlay.Text = "Roda: " .. number
+        wheel.resultUntil = os.clock() + 5
+        draw()
+        status(wheelOverlay.Visible and "Hasil ditampilkan saat data dikenali."
+            or "Hasil terbaca; menunggu posisi karakter di layar.")
     end
-    -- Only display a number sent or shown by the game. A prediction is never
-    -- substituted for a result that has not arrived yet.
-    local function readResult(raw, ownContext, source)
-        if not wheel.on or not alive() or type(raw) ~= "string" or #raw > 8192 then return false, false end
-        local clean = " " .. normalise(raw)
-        if not clean:find("wheel", 1, true) then return false, false end
-        local actor, number = clean:match("(.-)%s+spun%s+the%s+wheel%s+and%s+got%s*[:=!?%-]*%s*(%d+)")
-        if not number then
-            actor, number = clean:match("(.-)%s+spins?%s+the%s+wheel%s+and%s+gets?%s*[:=!?%-]*%s*(%d+)")
-        end
-        if not number then return false, false end
-        actor = trim(actor)
-        if actor == "" and not ownContext then return false, true end
-        if actor ~= "" and not ownActor(actor) then
-            status("Pesan roda terbaca, tetapi nama pemain tidak cocok atau tidak unik.")
-            return false, false
-        end
-        return showNumber(number, source), false
+    function Session.ReceiveWheelSpun(...)
+        wheel.sink(table.pack(...), "event WheelSpun")
     end
     function Session.SetWheelNetStatus(message)
-        if wheel.on and alive() then status(tostring(message)) end
+        status(tostring(message))
     end
-    -- Net.on("WheelSpun") is the game's decoded event; never infer a result
-    -- from a fixed byte position in a shared network packet.
-    function Session.ReceiveWheelSpun(...)
+    function Session.RefreshWheelDecoder(network)
+        wheel.network = network
         if not wheel.on or not alive() then return end
-        local args = table.pack(...)
-        local owners = {self=false, other=false}
-        local values, valueSet, seen = {}, {}, {}
-        local function addValue(value)
-            if type(value) == "string" and value:match("^%d+$") then value=tonumber(value) end
-            if type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value > 255 then return end
-            if not valueSet[value] then valueSet[value]=true; values[#values+1]=value end
-        end
-        local function owner(value)
-            if value == player then owners.self=true; return end
-            local ok, list = pcall(Players.GetPlayers, Players)
-            if not ok then return end
-            local selfMatch, otherMatch = false, false
-            for _, candidate in ipairs(list) do
-                local same = value == candidate
-                if type(value) == "number" then same = value == candidate.UserId end
-                if type(value) == "string" then
-                    local lower = string.lower(value)
-                    local numericId = value:match("^%d+$") and tonumber(value) or nil
-                    same = (numericId ~= nil and numericId == candidate.UserId)
-                        or lower == string.lower(candidate.Name or "") or lower == string.lower(candidate.DisplayName or "")
-                end
-                if same and candidate == player then selfMatch=true elseif same then otherMatch=true end
-            end
-            -- A shared display name is not enough to identify either player.
-            if selfMatch and not otherMatch then owners.self=true
-            elseif otherMatch and not selfMatch then owners.other=true end
-        end
-        local resultKeys = {"result", "Result", "number", "Number", "roll", "Roll", "outcome", "Outcome",
-            "wheelNumber", "WheelNumber", "wheelResult", "spinResult", "numberRolled"}
-        local ownerKeys = {"player", "Player", "userId", "UserId", "playerId", "PlayerId", "sender", "Sender", "username", "Username"}
-        local function inspect(value, depth)
-            if type(value) ~= "table" or seen[value] or depth > 2 then return end
-            seen[value]=true
-            for _, key in ipairs(ownerKeys) do
-                local item=rawget(value,key)
-                if item ~= nil then owner(item) end
-            end
-            for _, key in ipairs(resultKeys) do
-                local item=rawget(value,key)
-                if item ~= nil and type(item) ~= "table" then addValue(item) end
-            end
-            for _, key in ipairs({"data", "Data", "payload", "Payload", "value"}) do
-                local item=rawget(value,key)
-                if type(item) == "table" then inspect(item, depth+1) end
-            end
-        end
-        for i=1,math.min(args.n,8) do
-            local value=args[i]
-            if value == player then
-                owners.self=true
-            elseif type(value)=="table" then
-                inspect(value,0)
-            elseif type(value)=="string" or (type(value)=="number" and value>255) then
-                owner(value)
-            end
-        end
-        if owners.other then status("WheelSpun diterima untuk pemain lain."); return end
-        for i=1,math.min(args.n,8) do
-            local value=args[i]
-            if type(value) == "string" then
-                local matched=readResult(value, owners.self, "WheelSpun")
-                if matched then return end
-            end
-        end
-        if #values == 1 then
-            local source=owners.self and "event WheelSpun" or "event WheelSpun; pemilik belum diketahui"
-            showNumber(values[1], source)
-            return
-        end
-        if #values > 1 then status("WheelSpun diterima, tetapi beberapa angka berbeda perlu diperiksa."); return end
-        local scalars = {}
-        for i=1,math.min(args.n,8) do
-            local value=args[i]
-            if type(value)=="number" and value==math.floor(value) and value>=0 and value<=255
-                and value~=player.UserId then scalars[#scalars+1]=value end
-        end
-        if #scalars == 1 and (args.n == 1 or owners.self) then
-            wheelInfo:SetDesc("Kandidat angka event: " .. scalars[1] .. "\nPerlu dicocokkan dengan hasil game.")
-            wheelOverlay.Text="Roda?: " .. scalars[1]
-            wheelOverlay.Visible=true
-            status("WheelSpun mengirim satu angka; pemilik dan arti data belum dipastikan.")
-            return
-        end
-        local parts = {}
-        for i=1,math.min(args.n,4) do
-            local value=args[i]
-            if type(value) == "table" then
-                local keys={}
-                for k,v in pairs(value) do
-                    if type(k)=="string" and #k<=30 then keys[#keys+1]=k..":"..type(v) end
-                    if #keys>=6 then break end
-                end
-                table.sort(keys)
-                parts[#parts+1]="tabel("..table.concat(keys,",")..")"
-            elseif type(value) == "number" and value >= 0 and value <= 255 then
-                parts[#parts+1]="angka("..tostring(value)..")"
-            else
-                parts[#parts+1]=typeof(value)
-            end
-        end
-        status("WheelSpun diterima; format belum dikenali: " .. (#parts>0 and table.concat(parts," | ") or "tanpa data"))
-    end
-    local function sameLocalName(text)
-        local name = trim(normalise(text)):gsub("^[%[%({@%s]+", ""):gsub("[%]%)}>:%s]+$", "")
-        return ownActor(name) and (name == normalise(player.Name or "") or name == normalise(player.DisplayName or ""))
-    end
-    local function siblingOwnName(node)
-        local ok, children = pcall(function() return node.Parent and node.Parent:GetChildren() or {} end)
-        if not ok then return false end
-        for i, peer in ipairs(children) do
-            if i > 32 then break end
-            if peer ~= node then
-                local textOK, text = pcall(function()
-                    if peer:IsA("TextLabel") or peer:IsA("TextButton") or peer:IsA("TextBox") then return peer.Text end
-                end)
-                if textOK and type(text) == "string" and sameLocalName(text) then return true end
-            end
-        end
-        return false
-    end
-    local function handleNode(node, source)
-        local ok, text, ownCharacter = pcall(function()
-            local character = player.Character
-            return node.Text, character ~= nil and node:IsDescendantOf(character)
-        end)
-        if not ok then return end
-        local matched, needsOwner = readResult(text, ownCharacter, source)
-        if not matched and needsOwner and siblingOwnName(node) then
-            readResult(text, true, source)
-        elseif needsOwner and not matched then
-            status("Pesan roda terbaca, tetapi pemilik hasil belum dapat dipastikan.")
-        end
-    end
-    local function watchText(node, readCurrent, source)
-        if not wheel.on or not alive() or wheel.watched[node] then return end
-        local ok, valid = pcall(function()
-            return (node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox"))
-                and not node:IsDescendantOf(gui)
-        end)
-        if not ok or not valid then return end
-        local entry = {}
-        local generation = wheel.generation
-        wheel.watched[node] = entry
-        local connected, changed = pcall(function()
-            return node:GetPropertyChangedSignal("Text"):Connect(function()
-                if wheel.generation == generation then handleNode(node, source) end
-            end)
-        end)
-        if not connected then wheel.watched[node] = nil; return end
-        entry.changed = changed
-        local destroyedOK, destroyed = pcall(function()
-            return node.Destroying:Connect(function()
-                disconnect(entry.changed); disconnect(entry.destroyed)
-                if wheel.watched[node] == entry then wheel.watched[node] = nil end
-            end)
-        end)
-        if destroyedOK then entry.destroyed = destroyed end
-        if readCurrent then handleNode(node, source) end
-    end
-    local function watchRoot(container, generation, source)
-        if not container or wheel.roots[container] then return end
-        wheel.roots[container] = true
-        local ok, connection = pcall(function()
-            return container.DescendantAdded:Connect(function(node)
-                if wheel.on and alive() and wheel.generation == generation then watchText(node, true, source) end
-            end)
-        end)
-        if ok then table.insert(wheel.signals, connection) end
-        task.spawn(function()
-            local listOK, nodes = pcall(container.GetDescendants, container)
-            if not listOK then return end
-            for i, node in ipairs(nodes) do
-                if not alive() or not wheel.on or wheel.generation ~= generation then return end
-                -- Existing labels may contain a previous spin. Listen for their
-                -- next change instead of presenting old text as a new result.
-                watchText(node, false, source)
-                if i % 100 == 0 then task.wait() end
-            end
-        end)
-    end
-    local function watchWorld(container, generation)
-        if not container then return end
-        local function watchBillboard(instance, readCurrent)
-            local ok, nodes = pcall(instance.GetDescendants, instance)
-            if not ok then return end
-            for i, child in ipairs(nodes) do
-                if not alive() or not wheel.on or wheel.generation ~= generation or i > 200 then return end
-                watchText(child, readCurrent, "teks di world")
-            end
-        end
-        local ok, connection = pcall(function()
-            return container.DescendantAdded:Connect(function(node)
-                if not alive() or not wheel.on or wheel.generation ~= generation then return end
-                local isGuiOK, isGui = pcall(function() return node:IsA("BillboardGui") or node:IsA("SurfaceGui") end)
-                if isGuiOK and isGui then watchBillboard(node, true); return end
-                local valid, isWorldText = pcall(function()
-                    return (node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox"))
-                        and (node:FindFirstAncestorOfClass("BillboardGui") or node:FindFirstAncestorOfClass("SurfaceGui"))
-                end)
-                if valid and isWorldText then watchText(node, true, "teks di world") end
-            end)
-        end)
-        if ok then table.insert(wheel.signals, connection) end
-        -- Find reusable world billboards once, with a cap and frame yields.
-        -- Do not read their old text as a new spin.
-        task.spawn(function()
-            local rootsOK, stack = pcall(container.GetChildren, container)
-            if not rootsOK then return end
-            local visited = 0
-            while #stack > 0 and visited < 6000 do
-                if not alive() or not wheel.on or wheel.generation ~= generation then return end
-                local current = table.remove(stack)
-                visited += 1
-                local guiOK, isGui = pcall(function() return current:IsA("BillboardGui") or current:IsA("SurfaceGui") end)
-                if guiOK and isGui then
-                    watchBillboard(current, false)
-                else
-                    local childOK, children = pcall(current.GetChildren, current)
-                    if childOK then for _, child in ipairs(children) do stack[#stack + 1] = child end end
-                end
-                if visited % 150 == 0 then task.wait() end
-            end
-        end)
-    end
-    local function watchNetwork(container, generation)
-        if not container then return end
-        local names = {"wheel", "spin", "roulette", "chat", "message", "bubble", "announce", "notify", "system"}
-        local count = 0
-        local function watchRemote(remote)
-            if not alive() or not wheel.on or wheel.generation ~= generation or wheel.remotes[remote] or count >= 64 then return end
-            local ok, wanted, directResult = pcall(function()
-                if not remote:IsA("RemoteEvent") then return false end
-                local name = string.lower(remote.Name)
-                for _, term in ipairs(names) do
-                    if name:find(term, 1, true) then
-                        return true, name:find("wheel", 1, true) ~= nil
-                            or name:find("roulette", 1, true) ~= nil
-                    end
-                end
-                return false
-            end)
-            if not ok or not wanted then return end
-            local connected, connection = pcall(function()
-                return remote.OnClientEvent:Connect(function(...)
-                    if not alive() or not wheel.on or wheel.generation ~= generation then return end
-                    local args = table.pack(...)
-                    local own = false
-                    for i = 1, math.min(args.n, 12) do
-                        local value = args[i]
-                        if value == player then own = true end
-                        if type(value) == "table" then
-                            local who = rawget(value, "player") or rawget(value, "sender") or rawget(value, "userId") or rawget(value, "UserId")
-                            if who == player or who == player.UserId or who == player.Name then own = true end
-                        end
-                    end
-                    for i = 1, math.min(args.n, 12) do
-                        local value = args[i]
-                        if type(value) == "string" then
-                            readResult(value, own, "pesan game")
-                        elseif type(value) == "table" then
-                            for _, key in ipairs({"text", "Text", "message", "Message", "content", "msg"}) do
-                                local text = rawget(value, key)
-                                if type(text) == "string" then readResult(text, own, "pesan game") end
-                            end
-                            if own and directResult then
-                                for _, key in ipairs({"result", "Result", "number", "Number", "outcome"}) do
-                                    local result = rawget(value, key)
-                                    if type(result) == "number" or type(result) == "string" then
-                                        if showNumber(result, "hasil game") then break end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end)
-            end)
-            if connected then
-                wheel.remotes[remote] = true
-                count += 1
-                table.insert(wheel.signals, connection)
-            end
-        end
-        local ok, connection = pcall(function()
-            return container.DescendantAdded:Connect(watchRemote)
-        end)
-        if ok then table.insert(wheel.signals, connection) end
-        task.spawn(function()
-            local listOK, nodes = pcall(container.GetDescendants, container)
-            if not listOK then return end
-            for i, node in ipairs(nodes) do
-                if not alive() or not wheel.on or wheel.generation ~= generation then return end
-                watchRemote(node)
-                if i % 150 == 0 then task.wait() end
-            end
-        end)
+        local installed, message = install(network)
+        status(message)
+        return installed
     end
     local function startWheel()
-        stopWheel(); wheel.on = true
+        stopWheel()
+        wheel.on = true
+        bridge.sink = wheel.sink
         local generation = wheel.generation
         wheelInfo:SetDesc("Belum ada hasil yang terbaca.")
-        status("Aktif. Pukul roda; angka muncul saat pesan hasil diterima.")
-        local ok, chat = pcall(game.GetService, game, "TextChatService")
-        if ok and chat then
+        local chatOK, chat = pcall(game.GetService, game, "TextChatService")
+        if chatOK and chat then
             local connected, connection = pcall(function()
                 return chat.MessageReceived:Connect(function(message)
-                    local textOK, messageText = pcall(function() return message.Text end)
-                    local prefixOK, prefix = pcall(function() return message.PrefixText end)
-                    local ownOK, own = pcall(function() return message.TextSource.UserId == player.UserId end)
-                    if textOK then
-                        local matched = readResult(messageText, ownOK and own, "chat game")
-                        if not matched and prefixOK and type(prefix) == "string" then
-                            readResult(prefix .. " " .. tostring(messageText or ""), ownOK and own, "chat game")
-                        end
+                    if not wheel.on or not alive() or wheel.generation ~= generation then return end
+                    local ok, source, text = pcall(function() return message.TextSource, message.Text end)
+                    if ok and source == nil and type(text) == "string" then
+                        local number = parseResult(table.pack(text), player)
+                        if number ~= nil then wheel.sink(table.pack(text), "pesan sistem game") end
                     end
                 end)
             end)
             if connected then table.insert(wheel.signals, connection) end
         end
-        watchRoot(playerGui, generation, "tampilan game")
-        if player.Character then watchRoot(player.Character, generation, "karakter") end
-        local coreOK, coreGui = pcall(game.GetService, game, "CoreGui")
-        if coreOK and coreGui then watchRoot(coreGui, generation, "tampilan chat") end
-        local worldOK, world = pcall(game.GetService, game, "Workspace")
-        if worldOK and world then watchWorld(world, generation) end
-        local netOK, replicated = pcall(game.GetService, game, "ReplicatedStorage")
-        if netOK and replicated then watchNetwork(replicated, generation) end
-        local charOK, charConn = pcall(function()
-            return player.CharacterAdded:Connect(function(character)
-                if wheel.on and wheel.generation == generation then watchRoot(character, generation, "karakter") end
+        table.insert(wheel.signals, game:GetService("RunService").RenderStepped:Connect(function()
+            local ok = pcall(draw)
+            if not ok then wheelOverlay.Visible = false end
+        end))
+        local installed, message = install(wheel.network)
+        status(message)
+        if not installed then
+            task.spawn(function()
+                for _ = 1, 5 do
+                    task.wait(2)
+                    if not wheel.on or not alive() or generation ~= wheel.generation then return end
+                    installed, message = install(wheel.network)
+                    status(message)
+                    if installed then return end
+                end
             end)
-        end)
-        if charOK then table.insert(wheel.signals, charConn) end
+        end
     end
     tab:Toggle({Title="Tampilkan angka otomatis", Desc="Angka tampil segera setelah hasil game terbaca.", Value=true,
         Callback=function(on)
@@ -1233,14 +1121,17 @@ do
                 end)
             end
         end})
-    connect(gui.Destroying, stopWheel)
+    connect(gui.Destroying, function()
+        stopWheel()
+        layer:Destroy()
+    end)
     startWheel()
 end
 
 local account=builtin("key")
 account:Paragraph({Title="Akun",Desc=tostring(player.DisplayName or player.Name or "Pemain").."\nUsername: "..tostring(player.Name or "—").."\nUser ID: "..tostring(player.UserId or "—")})
 account:Paragraph({Title="Lisensi key",Desc="Sistem key belum dikonfigurasi. Build ini belum membatasi akses dengan key."})
-builtin("updates"):Paragraph({Title="Premium P13",Desc="Proxy: pembaca event WheelSpun dan Fast Pull (percobaan).\nUtilitas: title OF LEGEND dengan nama hijau dan ikon emas (lokal).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
+builtin("updates"):Paragraph({Title="Premium P15",Desc="Proxy: pembaca event WheelSpun dan Fast Pull (percobaan).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
 
 Session.EngineUI={}
 function Session.EngineUI:CreateWindow()
@@ -1292,7 +1183,7 @@ function UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
     end
-    label(nav,"PREMIUM  •  P13",11,"muted",{Size=UDim2.new(1,0,0,34)})
+    label(nav,"PREMIUM  •  P15",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
 function UI.show(id,groupId)
     if not alive() or not PAGES[id] then return end
@@ -1777,8 +1668,6 @@ local Misc = {
     DownHeld = false, -- tombol ▼ di layar ditahan
     CustomName = true,          -- watermark nama (selalu aktif, mati hanya saat script ditutup)
     NameText = "Zekio Supreme",  -- teks watermark
-    LegendTitle = false,         -- local-only cosmetic title above the character
-    LegendName = "",             -- empty uses the Roblox display name; can be edited
 }
 
 -- Auto Clear World
@@ -2856,7 +2745,7 @@ State.PlaceMs = math.max(State.PlaceMs, 140)
 State.BreakMs = math.max(State.BreakMs, 200)
 Farmer.HarvestMs = math.max(Farmer.HarvestMs, 140)
 Farmer.PlantMs = math.max(Farmer.PlantMs, 140)
-Config.add("Misc", Misc, { "Speed", "LegendTitle", "LegendName" })
+Config.add("Misc", Misc, { "Speed" })
 Config.add("Chat", Spam, { "Texts", "IntervalSec" })
 Config.add("Lahan", Land, { "X0", "X1", "Y0" })
 Config.add("Bangun", Build, { "BlockId", "ThenPabrik", "BreakX", "BreakY", "Tiles" })
@@ -3288,48 +3177,59 @@ local function findRefs()
     return Refs.World ~= nil
 end
 
+
+
 -- WHEEL_SPUN_BRIDGE_BEGIN
--- Reuse one decoded listener if the premium UI is restarted. Some game
--- versions do not return an unsubscribe handle from Net.on.
+-- A Net.on listener is kept once per Net instance because some game versions
+-- do not return an unsubscribe handle. The active UI supplies a replaceable sink.
 local function bindWheelSpun()
+    if type(Premium.RefreshWheelDecoder) == "function" then
+        pcall(Premium.RefreshWheelDecoder, Net)
+    end
     if not NetOk or type(Net) ~= "table" or type(Net.on) ~= "function"
         or type(Net.EVENTS) ~= "table" or Net.EVENTS.WheelSpun == nil then
-        if Premium.SetWheelNetStatus then Premium.SetWheelNetStatus("WheelSpun: jalur Net belum tersedia.") end
+        if Premium.SetWheelNetStatus then
+            Premium.SetWheelNetStatus("Event WheelSpun belum tersedia; pemantau decoder tetap aktif jika ditemukan.")
+        end
         return false
     end
     local key = "__ZekioWheelSpunBridgeV1"
-    local bridge = rawget(G,key)
+    local bridge = rawget(G, key)
     if type(bridge) ~= "table" or bridge.net ~= Net or bridge.bound ~= true then
-        if type(bridge) == "table" then bridge.sink=nil; bridge.world=nil end
-        bridge = {net=Net, bound=false}
+        if type(bridge) == "table" then bridge.sink = nil; bridge.world = nil end
+        bridge = {net = Net, bound = false}
         local function dispatch(...)
-            local sink=bridge.sink
-            if type(sink)=="function" then pcall(sink,...) end
+            local sink = bridge.sink
+            if type(sink) == "function" then pcall(sink, ...) end
         end
         local function worldName()
-            local getter=bridge.world
-            if type(getter)~="function" then return "" end
-            local ok, name=pcall(getter)
+            local getter = bridge.world
+            if type(getter) ~= "function" then return "" end
+            local ok, name = pcall(getter)
             return ok and name or ""
         end
         local ok, result = pcall(Net.on, "WheelSpun", dispatch, worldName)
         if not ok or result == false then
-            if Premium.SetWheelNetStatus then Premium.SetWheelNetStatus("WheelSpun: gagal memasang pemantau event.") end
+            if Premium.SetWheelNetStatus then
+                Premium.SetWheelNetStatus("Event WheelSpun gagal dipasang; pemantau decoder tetap aktif jika ditemukan.")
+            end
             return false
         end
-        bridge.bound=true
-        G[key]=bridge
+        bridge.bound = true
+        G[key] = bridge
     end
     local function sink(...)
         if alive() and Premium.ReceiveWheelSpun then Premium.ReceiveWheelSpun(...) end
     end
-    bridge.sink=sink
-    bridge.world=function()
-        local world=Refs.World
-        return world and rawget(world,"name") or ""
+    bridge.sink = sink
+    bridge.world = function()
+        local world = Refs.World
+        return world and rawget(world, "name") or ""
     end
-    Session.WheelBridge, Session.WheelSink=bridge,sink
-    if Premium.SetWheelNetStatus then Premium.SetWheelNetStatus("WheelSpun terpasang. Pukul roda untuk membaca datanya.") end
+    Session.WheelBridge, Session.WheelSink = bridge, sink
+    if Premium.SetWheelNetStatus then
+        Premium.SetWheelNetStatus("Event WheelSpun terdaftar; menunggu data hasil dari game.")
+    end
     return true
 end
 bindWheelSpun()
@@ -11497,9 +11397,8 @@ task.spawn(function()
 end)
 
 ---------------------------------------------------------------------
--- WATERMARK DAN TITLE LOKAL
+-- WATERMARK NAMA LOKAL
 ---------------------------------------------------------------------
--- Local nameplate styling only; no title entitlement or server state is changed.
 local TextService = game:GetService("TextService")
 local NameFx = { t0 = os.clock() }
 local NAME_COLORS = ColorSequence.new({
@@ -11511,21 +11410,6 @@ local NAME_COLORS = ColorSequence.new({
 })
 local NAME_FONT = Enum.Font.FredokaOne
 
-function NameFx.cleanName(value)
-    local name=tostring(value or ""):gsub("%c",""):gsub("^%s+",""):gsub("%s+$","")
-    name=name:gsub("%s+[Oo][Ff]%s+[Ll][Ee][Gg][Ee][Nn][Dd]$",""):gsub("%s+$","")
-    if string.upper(name)=="OF LEGEND" then name="" end
-    local count=utf8.len(name)
-    if not count or count==0 then
-        name=tostring(LocalPlayer.DisplayName or LocalPlayer.Name or "Zekio Supreme")
-        count=utf8.len(name)
-    end
-    if count and count>32 then name=name:sub(1,utf8.offset(name,33)-1) end
-    return name
-end
-function NameFx.legendText()
-    return NameFx.cleanName(Misc.LegendName).." OF LEGEND"
-end
 local function nameHolders()
     local gg=PlayerGui:FindFirstChild("GameGui")
     local world=gg and gg:FindFirstChild("World")
@@ -11539,33 +11423,14 @@ local function textWidth(text,size)
     local ok,v=pcall(TextService.GetTextSize,TextService,text,size,NAME_FONT,Vector2.new(2000,200))
     return (ok and v.X or #text*size*.55)+6
 end
-function NameFx.makeOrb(holder,size,z)
-    local orb=Instance.new("Frame")
-    orb.Name="ZekioLegendOrb";orb.BackgroundTransparency=1;orb.BorderSizePixel=0
-    orb.Size=UDim2.fromOffset(size,size);orb.AnchorPoint=Vector2.new(0,.5)
-    orb.Position=UDim2.new(0,2,.5,0);orb.ZIndex=z;orb.Parent=holder
-    local function disk(parent,diameter,x,y,color,alpha,index)
-        local f=Instance.new("Frame")
-        f.Size=UDim2.fromOffset(diameter,diameter);f.Position=UDim2.fromOffset(x,y)
-        f.BackgroundColor3=color;f.BackgroundTransparency=alpha;f.BorderSizePixel=0;f.ZIndex=index;f.Parent=parent
-        local corner=Instance.new("UICorner");corner.CornerRadius=UDim.new(1,0);corner.Parent=f
-        return f
-    end
-    disk(orb,size+6,-3,-3,Color3.fromRGB(255,210,56),.72,z)
-    local core=disk(orb,size,0,0,Color3.fromRGB(255,204,45),0,z+1)
-    local stroke=Instance.new("UIStroke");stroke.Thickness=1;stroke.Color=Color3.fromRGB(203,141,16);stroke.Parent=core
-    disk(orb,math.max(4,size*.42),size*.19,size*.12,Color3.fromRGB(255,255,213),.08,z+2)
-    return orb
-end
 local function makeLabel(holder,size,isTag)
     local lb=Instance.new("TextLabel")
     lb.Name="ZekioPremiumName";lb.BackgroundTransparency=1;lb.RichText=false
     lb.Font=NAME_FONT;lb.TextSize=size;lb.TextColor3=Color3.new(1,1,1);lb.Text=Misc.NameText
     lb.ZIndex=isTag and 1017 or 10
-    local inset
     if isTag then
         lb.AnchorPoint=Vector2.new(.5,.5);lb.Position=UDim2.fromScale(.5,.5)
-        inset=Instance.new("UIPadding");inset.PaddingLeft=UDim.new(0,0);inset.Parent=lb
+        lb.TextXAlignment=Enum.TextXAlignment.Center
     else
         lb.AnchorPoint=Vector2.new(0,.5);lb.Position=UDim2.new(0,3,.5,0);lb.TextXAlignment=Enum.TextXAlignment.Left
     end
@@ -11574,12 +11439,11 @@ local function makeLabel(holder,size,isTag)
     local gradient=Instance.new("UIGradient");gradient.Color=NAME_COLORS;gradient.Rotation=12;gradient.Parent=lb
     local scale=Instance.new("UIScale");scale.Parent=lb;lb.Parent=holder
     return {holder=holder,bitmap=holder:FindFirstChild("BitmapText"),label=lb,gr=gradient,sc=scale,
-        pad=inset,size=size,isTag=isTag,text=nil,w=0,legend=nil}
+        isTag=isTag,text=nil,w=0}
 end
 local function dropEntry(entry)
     if not entry then return end
     pcall(function() entry.label:Destroy() end)
-    if entry.orb then pcall(function() entry.orb:Destroy() end) end
     if entry.bitmap then pcall(function() entry.bitmap.Visible=true end) end
     if entry.isTag and entry.bitmap then
         pcall(function()
@@ -11591,7 +11455,6 @@ local function dropEntry(entry)
     end
 end
 local function nameRestore()
-    if NameFx.shutdownTitle then NameFx.shutdownTitle() end
     dropEntry(NameFx.tag);dropEntry(NameFx.panel)
     NameFx.tag,NameFx.panel=nil,nil
 end
@@ -11600,20 +11463,12 @@ local function nameKeep(entry,holder,size,isTag)
     if not entry or entry.holder~=holder or not entry.label.Parent then
         dropEntry(entry);entry=makeLabel(holder,size,isTag)
     end
-    local legend=isTag and Misc.LegendTitle==true
-    local text=legend and NameFx.legendText() or Misc.NameText
-    if entry.text~=text or entry.legend~=legend then
-        entry.text,entry.legend=text,legend;entry.label.Text=text
-        entry.w=textWidth(text,size)+(legend and 24 or 0)
-        entry.label.TextColor3=legend and Color3.fromRGB(199,255,157) or Color3.new(1,1,1)
-        entry.gr.Enabled=not legend
-        if isTag then
-            entry.label.TextXAlignment=legend and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
-            entry.pad.PaddingLeft=UDim.new(0,legend and 24 or 0)
-        end
+    local text=Misc.NameText
+    if entry.text~=text then
+        entry.text=text
+        entry.label.Text=text
+        entry.w=textWidth(text,size)
     end
-    if legend and not entry.orb then entry.orb=NameFx.makeOrb(holder,math.floor(size*.74),entry.label.ZIndex) end
-    if entry.orb then entry.orb.Visible=legend end
     if entry.bitmap and entry.bitmap.Visible then entry.bitmap.Visible=false end
     if isTag then
         local height=math.max(holder.Size.Y.Offset,size+6)
@@ -11624,271 +11479,16 @@ local function nameKeep(entry,holder,size,isTag)
     else entry.label.Size=UDim2.new(1,-6,1,0) end
     return entry
 end
--- An independent screen-space title avoids clipping in the game's sprite frames.
-function NameFx.setStatus(message)
-    if NameFx.Status==message then return end
-    NameFx.Status=message
-    if UI.TitleTargetStatus then pcall(function() UI.TitleTargetStatus:SetDesc(message) end) end
-end
-function NameFx.restoreHidden()
-    for object,entry in pairs(NameFx.Hidden or {}) do
-        for _,connection in ipairs(entry.connections) do connection:Disconnect() end
-        pcall(function()
-            if object.Parent then
-                for property,spec in pairs(entry.properties) do object[property]=spec.original end
-            end
-        end)
-    end
-    NameFx.Hidden={}
-end
-function NameFx.shutdownTitle()
-    NameFx.restoreHidden()
-    if NameFx.OverlayGui then pcall(function() NameFx.OverlayGui:Destroy() end) end
-    NameFx.OverlayGui,NameFx.Overlay,NameFx.HiddenTarget=nil,nil,nil
-    NameFx.Cache=nil
-end
-local function titleGui(object)
-    if not object then return false end
-    local ok,result=pcall(function() return object:IsA("GuiObject") end)
-    return ok and result
-end
-local function titleChild(root,name,recursive)
-    if not root then return nil end
-    local ok,result=pcall(function() return root:FindFirstChild(name,recursive==true) end)
-    return ok and result or nil
-end
-local function titleChildren(root)
-    local out,queue={}, {root}
-    local index=1
-    while index<=#queue and #out<3500 do
-        local current=queue[index];index+=1
-        local ok,children=pcall(function() return current:GetChildren() end)
-        if ok then
-            for _,child in ipairs(children) do
-                local name=string.lower(child.Name or "")
-                if name~="tiles" then
-                    out[#out+1]=child;queue[#queue+1]=child
-                    if #out>=3500 then break end
-                end
-            end
-        end
-    end
-    return out
-end
-local function titleBounds(object)
-    if not titleGui(object) then return nil end
-    local ok,position,size=pcall(function() return object.AbsolutePosition,object.AbsoluteSize end)
-    if ok and size.X>0 and size.Y>0 then return position,size end
-    local bitmap=titleChild(object,"BitmapText",true)
-    if bitmap and titleGui(bitmap) then
-        local good,p,s=pcall(function() return bitmap.AbsolutePosition,bitmap.AbsoluteSize end)
-        if good and s.X>0 and s.Y>0 then return p,s end
-    end
-end
-local function titleVisible(object)
-    local current=object
-    for _=1,24 do
-        if not current then return true end
-        if titleGui(current) and current.Visible==false and not (NameFx.Hidden and NameFx.Hidden[current]) then return false end
-        local ok,isScreen=pcall(function() return current:IsA("ScreenGui") end)
-        if ok and isScreen and current.Enabled==false then return false end
-        current=current.Parent
-    end
-    return true
-end
-local function titleOtherPlayer(object,world,localView)
-    local current=object
-    for _=1,20 do
-        if not current or current==world then return false end
-        if current==localView then return false end
-        local name=string.lower(current.Name or "")
-        if name=="others" or name=="otherplayers" or name=="players" then return true end
-        local ok,uid=pcall(function() return current:GetAttribute("UserId") end)
-        local id=tonumber(uid)
-        if ok and id and id>0 and id~=LocalPlayer.UserId then return true end
-        current=current.Parent
-    end
-    return false
-end
-function NameFx.resolveTitle(force)
-    local cached=NameFx.Cache
-    if not force and cached and cached.world.Parent then
-        if cached.pv and not cached.pv.Parent then cached.pv=nil;force=true end
-        if cached.tag and not cached.tag.Parent then cached.tag=nil;force=true end
-        if not force and os.clock()<(NameFx.NextScan or 0) then return cached end
-    end
-    if not force and not cached and os.clock()<(NameFx.NextScan or 0) then return nil end
-    NameFx.NextScan=os.clock()+1
-    local candidates={}
-    if Shared and Shared.GameGui then candidates[#candidates+1]=Shared.GameGui end
-    local direct=titleChild(PlayerGui,"GameGui")
-    if direct then candidates[#candidates+1]=direct end
-    candidates[#candidates+1]=PlayerGui
-    local world,camera,pv
-    for _,root in ipairs(candidates) do
-        if root then
-            local candidate=(root.Name=="World" and root) or titleChild(root,"World",true)
-            local cam=titleChild(candidate,"Camera",true)
-            local view=titleChild(cam or candidate,"PlayerView",true)
-            if candidate and (cam or view) then world,camera,pv=candidate,cam,view;break end
-        end
-    end
-    if not world then NameFx.Cache=nil;return nil end
-    local tag=titleChild(camera,"NameTag") or titleChild(pv,"NameTag",true)
-        or titleChild(pv,"NamePlate",true) or titleChild(pv,"PlayerName",true)
-    if tag and (not titleGui(tag) or titleOtherPlayer(tag,world,pv)) then tag=nil end
-    if not tag then
-        local ppos,psize=titleBounds(pv)
-        local best,bestScore,secondScore
-        for index,node in ipairs(titleChildren(world)) do
-            if index>3500 then break end
-            local name=string.lower(node.Name or "")
-            if (name=="nametag" or name=="nameplate" or name=="playername" or name=="bitmaptext")
-                and not titleOtherPlayer(node,world,pv) then
-                local holder=name=="bitmaptext" and node.Parent or node
-                local pos,size=titleBounds(holder)
-                local score
-                if pos and ppos then
-                    local dx=math.abs(pos.X+size.X/2-(ppos.X+psize.X/2))
-                    local dy=(ppos.Y-(pos.Y+size.Y/2))
-                    if dx<=math.max(80,psize.X*1.5) and dy>=-psize.Y*.35 and dy<=math.max(140,psize.Y*1.5) then
-                        score=dx+math.abs(dy)*.4
-                    end
-                elseif pos and name=="nametag" then score=100 end
-                if score then
-                    if not bestScore or score<bestScore then secondScore=bestScore;best,bestScore=holder,score
-                    elseif holder~=best and (not secondScore or score<secondScore) then secondScore=score end
-                end
-            end
-        end
-        if best and (not secondScore or secondScore-bestScore>4) then tag=best end
-    end
-    cached={world=world,pv=pv,tag=tag}
-    NameFx.Cache=cached
-    return cached
-end
-function NameFx.hideOriginal(holder)
-    if NameFx.HiddenTarget~=holder then NameFx.restoreHidden();NameFx.HiddenTarget=holder end
-    if not holder then return end
-    NameFx.Hidden=NameFx.Hidden or {}
-    local function mask(object,property,value)
-        local entry=NameFx.Hidden[object]
-        if not entry then entry={properties={},connections={}};NameFx.Hidden[object]=entry end
-        if entry.properties[property] then return end
-        entry.properties[property]={original=object[property]}
-        entry.connections[#entry.connections+1]=object:GetPropertyChangedSignal(property):Connect(function()
-            if alive() and Misc.LegendTitle and NameFx.Hidden[object]==entry and object[property]~=value then object[property]=value end
-        end)
-        object[property]=value
-    end
-    local function hide(object)
-        if not titleGui(object) then return end
-        if object:IsA("TextLabel") or object:IsA("TextBox") then
-            mask(object,"TextTransparency",1);mask(object,"TextStrokeTransparency",1)
-            for _,child in ipairs(object:GetChildren()) do if child:IsA("UIStroke") then mask(child,"Transparency",1) end end
-        else mask(object,"Visible",false) end
-    end
-    local bitmap=titleChild(holder,"BitmapText",true)
-    if bitmap then hide(bitmap) end
-    if holder:IsA("TextLabel") or holder:IsA("TextBox") then hide(holder) end
-    for _,child in ipairs(holder:GetChildren()) do
-        local name=string.lower(child.Name or "")
-        if child.Name=="ZekioTestName" or child.Name=="ZekioPremiumName" then hide(child)
-        elseif child:IsA("TextLabel") and not (name:find("wrench",1,true) or name:find("flag",1,true)
-            or name:find("country",1,true) or name:find("badge",1,true) or name:find("role",1,true)) then hide(child) end
-    end
-end
-function NameFx.ensureOverlay()
-    if NameFx.OverlayGui and NameFx.OverlayGui.Parent then return NameFx.Overlay end
-    local screen=Instance.new("ScreenGui")
-    screen.Name="ZekioLegendTitleLayer";screen.ResetOnSpawn=false;screen.IgnoreGuiInset=true
-    screen.DisplayOrder=math.max(1,Premium.Gui.DisplayOrder-1);screen.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
-    screen.Parent=Session.GuiParent(PlayerGui)
-    Session.StartupGuis=Session.StartupGuis or {};table.insert(Session.StartupGuis,screen)
-    local function panel(parent,name)
-        local f=Instance.new("Frame");f.Name=name;f.BackgroundTransparency=1;f.BorderSizePixel=0;f.Parent=parent;return f
-    end
-    local root=panel(screen,"TitleViewport");root.Size=UDim2.fromScale(1,1)
-    local group=panel(root,"TitleAnchor");group.AnchorPoint=Vector2.new(.5,1);group.Visible=false
-    local label=Instance.new("TextLabel")
-    label.Name="LegendText";label.BackgroundTransparency=1;label.RichText=false;label.Font=NAME_FONT
-    label.TextColor3=Color3.fromRGB(199,255,157);label.TextScaled=true;label.TextWrapped=false
-    label.TextXAlignment=Enum.TextXAlignment.Left;label.ZIndex=3;label.Parent=group
-    local stroke=Instance.new("UIStroke");stroke.Thickness=2;stroke.Color=Color3.fromRGB(25,37,13);stroke.Transparency=.12;stroke.Parent=label
-    local orb=panel(group,"LegendOrb");orb.AnchorPoint=Vector2.new(0,.5)
-    local function disk(name,size,pos,color,alpha,z)
-        local f=panel(orb,name);f.Size=size;f.Position=pos;f.BackgroundColor3=color;f.BackgroundTransparency=alpha;f.ZIndex=z
-        local corner=Instance.new("UICorner");corner.CornerRadius=UDim.new(1,0);corner.Parent=f;return f
-    end
-    disk("Glow",UDim2.fromScale(1.35,1.35),UDim2.fromScale(-.175,-.175),Color3.fromRGB(255,211,55),.72,1)
-    local gold=disk("Gold",UDim2.fromScale(1,1),UDim2.fromScale(0,0),Color3.fromRGB(255,204,45),0,2)
-    local edge=Instance.new("UIStroke");edge.Thickness=1;edge.Color=Color3.fromRGB(203,141,16);edge.Parent=gold
-    disk("Shine",UDim2.fromScale(.42,.42),UDim2.fromScale(.19,.12),Color3.fromRGB(255,255,213),.08,3)
-    NameFx.OverlayGui=screen
-    NameFx.Overlay={root=root,group=group,label=label,orb=orb}
-    return NameFx.Overlay
-end
-function NameFx.drawTitle()
-    local target=NameFx.resolveTitle(false)
-    local pvpos,pvsize,tagpos,tagsize
-    if target then
-        pvpos,pvsize=titleBounds(target.pv)
-        tagpos,tagsize=titleBounds(target.tag)
-    end
-    if not target or (not pvpos and not tagpos) or not titleVisible(target.pv or target.tag) then
-        if NameFx.Overlay then NameFx.Overlay.group.Visible=false end
-        NameFx.restoreHidden();NameFx.HiddenTarget=nil
-        NameFx.setStatus("Posisi karakter belum ditemukan. Masuk world lalu tekan Deteksi ulang nama.")
-        return
-    end
-    local overlay=NameFx.ensureOverlay()
-    local rp,rs=overlay.root.AbsolutePosition,overlay.root.AbsoluteSize
-    if rs.X<=0 or rs.Y<=0 then NameFx.setStatus("Menunggu ukuran layar…");return end
-    local x,y,height
-    if tagpos then
-        x,y=tagpos.X+tagsize.X/2,tagpos.Y+tagsize.Y
-        height=math.clamp(tagsize.Y,18,42)
-    else
-        x,y=pvpos.X+pvsize.X/2,pvpos.Y-math.max(2,pvsize.Y*.04)
-        height=math.clamp(pvsize.Y*.30,18,42)
-    end
-    local text=NameFx.legendText()
-    local diameter=height*.63
-    local gap=diameter+height*.28
-    local width=textWidth(text,height*.78)+gap
-    overlay.group.Size=UDim2.fromScale(width/rs.X,height/rs.Y)
-    overlay.group.Position=UDim2.fromScale((x-rp.X)/rs.X,(y-rp.Y)/rs.Y)
-    overlay.group.Visible=true
-    overlay.label.Position=UDim2.fromScale(gap/width,0);overlay.label.Size=UDim2.fromScale((width-gap)/width,1)
-    overlay.label.Text=text
-    overlay.orb.Size=UDim2.fromScale(diameter/width,diameter/height)
-    overlay.orb.Position=UDim2.fromScale((height*.06)/width,.5)
-    NameFx.hideOriginal(target.tag)
-    NameFx.setStatus("Title lokal aktif: "..text..(target.tag and "" or "\nNama bawaan belum dikenali; title mengikuti karakter."))
-end
 function NameFx.refresh()
     if not alive() or not Misc.CustomName then return end
     local tag,panelName=nameHolders()
-    if Misc.LegendTitle then
-        if NameFx.tag then dropEntry(NameFx.tag);NameFx.tag=nil end
-        NameFx.drawTitle()
-    else
-        if NameFx.Overlay then NameFx.Overlay.group.Visible=false end
-        NameFx.restoreHidden();NameFx.HiddenTarget=nil
-        NameFx.tag=nameKeep(NameFx.tag,tag,22,true)
-        NameFx.setStatus("OF LEGEND nonaktif")
-    end
+    NameFx.tag=nameKeep(NameFx.tag,tag,22,true)
     NameFx.panel=nameKeep(NameFx.panel,panelName,21,false)
-end
-function NameFx.rescan()
-    NameFx.Cache=nil;NameFx.NextScan=0
-    NameFx.refresh()
 end
 Session.RestoreNames=nameRestore
 table.insert(Connections,RunService.RenderStepped:Connect(function()
     if not alive() then return end
-    local ok,message=pcall(NameFx.refresh)
-    if not ok then NameFx.setStatus("Gagal menampilkan title: "..tostring(message):sub(1,220)) end
+    pcall(NameFx.refresh)
     local elapsed=os.clock()-NameFx.t0
     local offset=Vector2.new(((elapsed*.45)%2)-1,0)
     local pulse=1+.045*math.sin(elapsed*3.2)
@@ -12200,7 +11800,7 @@ Session.Report("Menghubungkan kontrol premium")
 local Window = I18N.wrap(WindUI:CreateWindow({
     Title = "Zekio Supreme",
     Icon = "sprout",
-    Author = "Premium P13 | engine r29",
+    Author = "Premium P15 | engine r29",
     Folder = "ZekioSupremePremium",
     Size = UDim2.fromOffset(640, 380),
     Theme = "Dark",
@@ -12693,25 +12293,6 @@ safe(function()
         Callback = function(on) setGhost(on) end,
     })
 end)
-
--- ===== TAB: TITLE (cosmetic client-side display only) =====
-do (function()
-    local tab=makeTab("Title","crown","fitur")
-    local options=box(tab,"Legendary title",true)
-    Misc.LegendName=NameFx.cleanName(Misc.LegendName)
-    local preview=tab:Paragraph({Title="Pratinjau title",Desc=NameFx.legendText().."\nHanya terlihat di layarmu; title resmi akun tidak berubah."})
-    UI.TitleTargetStatus=tab:Paragraph({Title="Status nama",Desc=NameFx.Status or "Menunggu tampilan karakter…"})
-    local function refresh()
-        preview:SetDesc((Misc.LegendTitle and "Aktif: " or "Pratinjau: ")..NameFx.legendText().."\nHanya terlihat di layarmu; title resmi akun tidak berubah.")
-        NameFx.refresh()
-    end
-    options:Toggle({Title="OF LEGEND",Desc="Nama hijau dengan ikon emas di atas karakter",Value=Misc.LegendTitle,
-        Callback=function(on) Misc.LegendTitle=on;refresh() end})
-    options:Input({Title="Nama di atas karakter",Desc="Isi nama Growblox kamu jika berbeda dari nama Roblox",Value=Misc.LegendName,
-        Placeholder="Nama karakter",Callback=function(text) Misc.LegendName=NameFx.cleanName(text);refresh() end})
-    options:Button({Title="Deteksi ulang nama",Desc="Cari lagi posisi karakter dan label namanya",Callback=NameFx.rescan})
-    refresh()
-end)() end
 
 -- ===== TAB: AUTO CHAT =====
 local ChatTab = makeTab("Auto Chat", "message-circle", "fitur")
@@ -15668,7 +15249,7 @@ end
 
 task.spawn(function()
     local ok, err = xpcall(function()
-        reconnect("Zekio Supreme Premium P13")
+        reconnect("Zekio Supreme Premium P15")
         if not alive() then return end
         Premium.ConnectionError = nil
         if Config.saved("Penjaga", "On") == true then
@@ -15724,6 +15305,10 @@ end)
 Session.Cleanup = function()
     if Session.Closed then return end
     Session.Closed=true
+    if Session.WheelBridge and Session.WheelBridge.sink == Session.WheelSink then
+        Session.WheelBridge.sink = nil
+        Session.WheelBridge.world = nil
+    end
     if Premium.ProxyStop then pcall(Premium.ProxyStop) end
     Session.CloseBoot()
     State.Running = false

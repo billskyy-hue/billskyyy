@@ -1294,7 +1294,7 @@ function Session.Cleanup()
 end
 UI.layout();UI.show("overview")
 
-Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-p13"
+Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-rejoin-1"
 return Session
 
 end)()
@@ -9816,7 +9816,10 @@ end
 -- Pindah world (lewat menu game); world sama & tanpa pintu = tidak pindah
 function Vend.travel(name, door)
     if name == Guard.worldName() and not door then return true end
-    local ok, err = goWorld(name, door)
+    Vend.Traveling = true
+    local called, ok, err = pcall(goWorld, name, door)
+    Vend.Traveling = false
+    if not called then return false, tostring(ok) end
     if ok then
         -- tunggu karakter muncul di world tujuan (bukan jeda tetap)
         local t0 = os.clock()
@@ -12610,7 +12613,7 @@ do (function() -- fungsi sendiri: variabel di dalam tidak ikut batas 200 local
 
     local function anyRunning()
         return State.Running or Clear.Running or Farmer.Running or Splice.Running or Spam.On
-            or Pabrik.Running or Build.Running
+            or Pabrik.Running or Build.Running or Vend.Running
     end
 
     -- Catat aktivitas yang sedang jalan (untuk dilanjutkan nanti)
@@ -12618,7 +12621,7 @@ do (function() -- fungsi sendiri: variabel di dalam tidak ikut batas 200 local
         local tx, ty = Auto.here()
         return {
             farm = State.Running and not State.Override, clear = Clear.Running, farmer = Farmer.Running,
-            spam = Spam.On, splice = Splice.Running, pabrik = Pabrik.Running, build = Build.Running,
+            spam = Spam.On, splice = Splice.Running, pabrik = Pabrik.Running, build = Build.Running, vend = Vend.Running,
             world = worldName(), tx = tx, ty = ty,
         }
     end
@@ -12725,6 +12728,8 @@ do (function() -- fungsi sendiri: variabel di dalam tidak ikut batas 200 local
             if stillBack(token) then Auto.startClear() end
         elseif saved.farmer then
             if stillBack(token) then Auto.startFarmer() end
+        elseif saved.vend then
+            if stillBack(token) and Vend.start then Vend.start() end
         elseif saved.splice then
             if stillBack(token) and Splice.start then Splice.start() end
         end
@@ -14768,14 +14773,16 @@ local Rejoin = {
     Server = true,      -- rejoin kalau disconnect dari server
     DelaySec = 5,
     ScriptUrl = Premium.LoaderURL,
-    Keep = false,       -- selalu kembali ke world tujuan kalau berada di luar world
+    Keep = true,        -- selalu kembali ke world tujuan kalau berada di luar world
     Target = "",        -- world tujuan (kosong = world terakhir)
     LastWorld = "",     -- world terakhir yang dimasuki
     Last = nil,         -- catatan aktivitas terakhir
     LastAt = 0,
     Busy = false,
     Count = 0,
-    Status = "-",
+    Status = "Mati — nyalakan Auto Rejoin",
+    Token = 0,
+    RetryAt = 0,
 }
 
 do (function()
@@ -14785,76 +14792,171 @@ do (function()
     local canFile = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
     local PENDING = "ZekioSupremePremium/rejoin_" .. tostring(LocalPlayer.UserId) .. ".json"
 
-    -- catat aktivitas selagi masih jalan
-    task.spawn(function()
-        while alive() do
-            local now = os.clock()
-            local wn = Guard.worldName and Guard.worldName() or ""
-            if wn ~= "" and not Pabrik.Traveling then Rejoin.LastWorld = wn end
-            if Guard.anyRunning and Guard.anyRunning() and Guard.Mode == "idle" then
-                Rejoin.Last = Guard.snapshot()
-                Rejoin.LastAt = now
-            elseif now - Rejoin.LastAt > 3 and Guard.Mode == "idle" and wn ~= "" then
-                -- masih di world tapi aktivitas dihentikan sendiri: jangan dilanjutkan
-                Rejoin.Last = nil
+    -- One worker owns a recovery. Keep the last valid snapshot frozen outside
+    -- the world; never replace it with empty-world coordinates or paused flags.
+    local function normalWorld()
+        return not Pabrik.Traveling and not Vend.Traveling and Guard.Mode == "idle"
+    end
+
+    local function ready(world)
+        local w = Refs.World
+        return world ~= "" and Guard.worldName() == world and w
+            and type(rawget(w, "fg")) == "table" and Auto.here() ~= nil
+    end
+
+    function Rejoin.targetWorld()
+        local t = tostring(Rejoin.Target or ""):upper():gsub("[^A-Z0-9]", "")
+        return t ~= "" and t or (Rejoin.LastWorld or "")
+    end
+
+    function Rejoin.capture()
+        if Rejoin.Busy or Rejoin.Leaving or not normalWorld() then return end
+        local world = Guard.worldName()
+        if not ready(world) then return end
+        if Rejoin.LastWorld ~= world then Rejoin.Last = nil end
+        Rejoin.LastWorld = world
+        if Guard.anyRunning() then
+            Rejoin.Last = Guard.snapshot()
+            if Rejoin.Last.vend and type(Vend.Home) == "string" and Vend.Home ~= "" then
+                Rejoin.Last.world = Vend.Home
+                Rejoin.LastWorld = Vend.Home
             end
-            task.wait(1)
+            Rejoin.LastAt = os.clock()
+        elseif os.clock() - Rejoin.LastAt > 3 then
+            Rejoin.Last = nil -- activity was stopped while still inside the world
         end
-    end)
+    end
 
-    local function resume(saved, reason)
+    local function resume(saved, reason, live)
         Guard.afterEnter()
+        if not alive() or (live and not live()) or not ready(saved.world) then return false end
         Rejoin.Count += 1
-        Rejoin.Status = "Masuk lagi berhasil, lanjut aktivitas"
-        notify("Auto Reconnect", reason .. ": lanjut aktivitas", 4)
-        Hook.send("rejoin", reason .. " ke " .. tostring(saved.world) .. ", aktivitas dilanjutkan")
+        Rejoin.Status = "Masuk lagi berhasil; memulihkan aktivitas"
+        notify("Auto Rejoin", reason .. ": memulihkan aktivitas", 4)
+        Hook.send("rejoin", reason .. " ke " .. tostring(saved.world))
         Guard.resumeSaved(saved)
+        Rejoin.ResumeToken = Guard.Token
+        return true
     end
 
-    -- ===== terlempar dari world =====
-    local function onWorldClosed(msg)
-        if not (Rejoin.On and Rejoin.World) or Rejoin.Busy or Pabrik.Traveling then return end
-        if Guard.Mode == "away" or Guard.Mode == "out" then return end -- Penjaga yang keluar
-        local saved = Rejoin.Last
-        if not saved or saved.world == "" or os.clock() - Rejoin.LastAt > 10 then return end
-        Rejoin.Busy = true
-        task.spawn(function()
+    function Rejoin.cancel()
+        Rejoin.Token += 1
+        Rejoin.Busy = false
+        Rejoin.Leaving = false
+        Rejoin.OutSince = nil
+        Rejoin.RetryAt = 0
+        if Rejoin.ResumeToken and Guard.Token == Rejoin.ResumeToken and Guard.Mode == "back" then
+            Guard.Token += 1
+            Guard.Mode, Guard.Saved = "idle", nil
             Guard.stopAll()
-            local text = tostring(msg or ""):gsub("`.", "")
-            Rejoin.Status = "Terlempar dari " .. saved.world .. ". Masuk lagi..."
-            Hook.send("rejoin", "Terlempar dari world " .. saved.world .. (text ~= "" and (" (" .. text .. ")") or ""))
-            task.wait(Rejoin.DelaySec + 1.5) -- tunggu animasi pintu selesai
-            for try = 1, 3 do
-                if not (alive() and Rejoin.On) then break end
-                local ok, err = Guard.enterWorld(saved.world)
-                if ok then
-                    task.wait(1.5)
-                    resume(saved, "Masuk lagi")
-                    Rejoin.Busy = false
-                    return
-                end
-                Rejoin.Status = ("Gagal masuk (%d/3): %s"):format(try, tostring(err))
-                task.wait(10)
-            end
-            Rejoin.Status = "Gagal masuk lagi ke " .. saved.world
-            notify("Auto Reconnect", Rejoin.Status, 5)
-            Hook.send("rejoin", Rejoin.Status)
-            Rejoin.Busy = false
-        end)
+        end
+        Rejoin.ResumeToken = nil
+        Rejoin.Status = "Auto Rejoin dibatalkan"
     end
 
-    -- game v1159+: WorldClosed lewat paket Net (ByteNet), bukan RemoteEvent bernama lagi.
-    -- Net.on hanya MENDENGAR (tidak kirim apa pun ke server). Listener tidak bisa dilepas,
-    -- jadi dicek alive() supaya script lama yang sudah ditutup tidak ikut jalan.
+    function Rejoin.set(on)
+        if not on then Rejoin.cancel() end
+        Rejoin.On = on == true
+        if Rejoin.On then
+            Rejoin.Keep = true
+            if UI.RejoinKeepToggle then pcall(function() UI.RejoinKeepToggle:Set(true) end) end
+            Rejoin.capture()
+            Rejoin.Status = "Siaga — kembali ke world terakhir dan lanjut aktivitas"
+        else
+            Rejoin.Last = nil
+            Rejoin.Status = "Auto Rejoin mati"
+        end
+    end
+
+    function Rejoin.request(world, saved, reason, manual)
+        if Rejoin.Busy or Rejoin.Leaving or not alive() or not normalWorld() or world == "" then return false end
+        if not manual and not Rejoin.On then return false end
+        Rejoin.Token += 1
+        local token = Rejoin.Token
+        local function live()
+            return alive() and Rejoin.Token == token and (manual or Rejoin.On)
+                and not Rejoin.Leaving and normalWorld()
+        end
+        local function waitFor(sec)
+            local untilAt = os.clock() + sec
+            repeat
+                if not live() then return false end
+                task.wait(0.1)
+            until os.clock() >= untilAt
+            return live()
+        end
+        Rejoin.Busy = true
+        Rejoin.Status = "Menunggu untuk masuk lagi ke " .. world
+        -- Stop synchronously so no old farm worker keeps moving during loading.
+        Guard.stopAll()
+        task.spawn(function()
+            local success = false
+            local ok, err = pcall(function()
+                if manual and Guard.worldName() ~= "" then
+                    if not Guard.leaveWorld() then error("Gagal keluar world") end
+                end
+                if not waitFor(math.max(2, tonumber(Rejoin.DelaySec) or 5)) then return end
+                for attempt = 1, 3 do
+                    if not live() then return end
+                    local here = Guard.worldName()
+                    if here ~= "" and here ~= world then
+                        Rejoin.Last = nil
+                        Rejoin.Status = "World diganti; rejoin sebelumnya dibatalkan"
+                        return
+                    end
+                    if not ready(world) then
+                        Rejoin.Status = ("Masuk ke %s (%d/3)"):format(world, attempt)
+                        local entered, why = Guard.enterWorld(world, live)
+                        if not entered then Rejoin.Status = "Menunggu world: " .. tostring(why) end
+                    end
+                    local timeout = os.clock() + 15
+                    while live() and not ready(world) and os.clock() < timeout do task.wait(0.25) end
+                    if not live() then return end
+                    if ready(world) then
+                        Guard.afterEnter()
+                        if not live() or not ready(world) then return end
+                        -- Revalidate after ref discovery, which can yield.
+                        Rejoin.Count += 1
+                        Rejoin.Status = "Kembali ke " .. world .. " berhasil"
+                        if saved and saved.world == world then
+                            Rejoin.Status ..= "; memulihkan aktivitas"
+                            Guard.resumeSaved(saved)
+                            Rejoin.ResumeToken = Guard.Token
+                        end
+                        success = true
+                        Hook.send("rejoin", reason .. ": " .. world)
+                        return
+                    end
+                    if attempt < 3 and not waitFor(8) then return end
+                end
+                Rejoin.Status = "World belum tersedia; dicoba lagi dalam 20 detik"
+            end)
+            if Rejoin.Token == token then
+                Rejoin.Busy = false
+                Rejoin.OutSince = nil
+                Rejoin.RetryAt = success and 0 or (os.clock() + 20)
+                if not ok then
+                    Rejoin.Status = "Rejoin gagal: " .. tostring(err):sub(1, 160) .. "; coba lagi nanti"
+                end
+            end
+        end)
+        return true
+    end
+
+    local function onWorldClosed(_msg)
+        if not (Rejoin.On and Rejoin.World) or not normalWorld() or Rejoin.Busy then return end
+        -- If the event precedes clearing the game state, capture it now.
+        Rejoin.capture()
+        local world = Rejoin.targetWorld()
+        Rejoin.request(world, Rejoin.Last, "World ditutup", false)
+    end
+
     local closedHooked = false
     if NetOk and type(Net) == "table" and type(Net.on) == "function"
         and type(Net.EVENTS) == "table" and Net.EVENTS.WorldClosed then
         closedHooked = pcall(Net.on, "WorldClosed", function(msg)
             if alive() then onWorldClosed(msg) end
-        end, function()
-            local w = Refs.World
-            return w and rawget(w, "name") or ""
-        end)
+        end, function() return Guard.worldName() end)
     end
     if not closedHooked then
         local closed = WorldRemotes:FindFirstChild("WorldClosed")
@@ -14865,95 +14967,38 @@ do (function()
         end
     end
 
-    -- ===== rejoin manual & selalu kembali ke world =====
-    -- Cara kerja:
-    --   Rejoin manual : catat aktivitas -> keluar world -> masuk lagi -> lanjut aktivitas.
-    --   Selalu kembali: tiap 2 detik cek, kalau kamu di luar world (layar pilih world)
-    --                   lebih lama dari jeda -> masuk ke world tujuan -> lanjut aktivitas.
-    function Rejoin.targetWorld()
-        local t = tostring(Rejoin.Target or ""):upper():gsub("[^A-Z0-9]", "")
-        if t ~= "" then return t end
-        return Rejoin.LastWorld or ""
-    end
-
-    local function enterAndResume(world, saved, reason)
-        for try = 1, 3 do
-            if not alive() then return false end
-            local ok, err = Guard.enterWorld(world)
-            if ok then
-                task.wait(1.5)
-                if saved and saved.world == world then
-                    resume(saved, reason)
-                else
-                    Guard.afterEnter()
-                    Rejoin.Count += 1
-                    Rejoin.Status = reason .. " ke " .. world .. " berhasil"
-                    Hook.send("rejoin", reason .. " ke " .. world)
-                end
-                return true
-            end
-            Rejoin.Status = ("Gagal masuk %s (%d/3): %s"):format(world, try, tostring(err))
-            task.wait(8)
-        end
-        notify("Auto Rejoin", "Gagal masuk " .. world, 5)
-        Hook.send("rejoin", "Gagal masuk " .. world)
-        return false
-    end
-
     function Rejoin.now()
-        if Rejoin.Busy then
-            notify("Auto Rejoin", "Sedang proses masuk world, tunggu dulu", 3)
-            return
-        end
+        Rejoin.capture()
         local world = Rejoin.targetWorld()
         if world == "" then
-            notify("Auto Rejoin", "World tujuan belum ada. Isi 'World tujuan' atau masuk world dulu", 4)
+            notify("Auto Rejoin", "Masuk world dulu atau isi World tujuan", 4)
             return
         end
-        Rejoin.Busy = true
-        task.spawn(function()
-            local saved = nil
-            if Guard.worldName() ~= "" then
-                if Guard.anyRunning() then saved = Guard.snapshot() end
-                Guard.stopAll()
-                Rejoin.Status = "Keluar world..."
-                if not Guard.leaveWorld() then
-                    Rejoin.Status = "Gagal keluar world"
-                    notify("Auto Rejoin", Rejoin.Status, 4)
-                    Rejoin.Busy = false
-                    return
-                end
-                task.wait(math.max(2, Rejoin.DelaySec))
-            end
-            if saved and saved.world ~= world then saved = nil end -- world lain: aktivitas tidak dilanjutkan
-            Rejoin.Status = "Masuk ke " .. world .. "..."
-            enterAndResume(world, saved, "Rejoin")
-            Rejoin.Busy = false
-        end)
+        if not Rejoin.request(world, Rejoin.Last, "Rejoin manual", true) then
+            notify("Auto Rejoin", "Tunggu proses masuk world atau perjalanan yang sedang berjalan", 4)
+        end
+    end
+
+    function Rejoin.tick()
+        Rejoin.capture()
+        if not (Rejoin.On and Rejoin.Keep) or Rejoin.Busy or Rejoin.Leaving or not normalWorld() then
+            Rejoin.OutSince = nil
+            return
+        end
+        if Guard.worldName() ~= "" then
+            Rejoin.OutSince = nil
+            return
+        end
+        Rejoin.OutSince = Rejoin.OutSince or os.clock()
+        if os.clock() - Rejoin.OutSince < 0.5 or os.clock() < Rejoin.RetryAt then return end
+        Rejoin.request(Rejoin.targetWorld(), Rejoin.Last, "Kembali otomatis", false)
     end
 
     task.spawn(function()
-        local outSince = nil
         while alive() do
-            task.wait(2)
-            local out = Guard.worldName() == ""
-            local free = Rejoin.On and Rejoin.Keep and not Rejoin.Busy and not Rejoin.Leaving and not Pabrik.Traveling
-                and Guard.Mode == "idle"
-            if not (out and free) then
-                outSince = nil
-            else
-                outSince = outSince or os.clock()
-                local world = Rejoin.targetWorld()
-                if world ~= "" and os.clock() - outSince >= Rejoin.DelaySec then
-                    outSince = nil
-                    Rejoin.Busy = true
-                    local saved = Rejoin.Last
-                    if saved and (saved.world ~= world or os.clock() - Rejoin.LastAt > 600) then saved = nil end
-                    Rejoin.Status = "Di luar world, masuk ke " .. world .. "..."
-                    enterAndResume(world, saved, "Kembali otomatis")
-                    Rejoin.Busy = false
-                end
-            end
+            local ok, err = pcall(Rejoin.tick)
+            if not ok then Rejoin.Status = "Menunggu data world: " .. tostring(err):sub(1, 120) end
+            task.wait(0.25)
         end
     end)
 
@@ -14962,21 +15007,24 @@ do (function()
         local q = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
         local url = tostring(Rejoin.ScriptUrl or "")
         if type(q) == "function" and string.sub(url, 1, 8) == "https://" then
-            pcall(q, ("loadstring(game:HttpGet(%q))()"):format(url))
-            return true
+            return pcall(q, ("loadstring(game:HttpGet(%q))()"):format(url))
         end
         return false
     end
 
     local function onDisconnect(msg)
         if not (Rejoin.On and Rejoin.Server) or Rejoin.Leaving then return end
+        Rejoin.capture()
         Rejoin.Leaving = true
+        Rejoin.Token += 1
+        local disconnectToken = Rejoin.Token
         local saved = Rejoin.Last or (Guard.anyRunning() and Guard.snapshot()) or nil
-        local world = saved and saved.world or Guard.worldName()
+        local world = saved and saved.world or Rejoin.targetWorld()
+        Config.save(true) -- creates the config folder before writing the resume record
         if canFile and saved then
             local data = {
                 world = saved.world, farm = saved.farm, clear = saved.clear, farmer = saved.farmer,
-                spam = saved.spam, splice = saved.splice, pabrik = saved.pabrik, build = saved.build,
+                spam = saved.spam, splice = saved.splice, pabrik = saved.pabrik, build = saved.build, vend = saved.vend,
                 tx = saved.tx, ty = saved.ty, at = os.time(),
             }
             pcall(function() writefile(PENDING, HttpService:JSONEncode(data)) end)
@@ -14986,7 +15034,7 @@ do (function()
         Hook.send("rejoin", "Disconnect dari server (" .. tostring(msg) .. "). Rejoin ke " .. (world ~= "" and world or "game"))
         task.spawn(function()
             task.wait(Rejoin.DelaySec)
-            while alive() do
+            while alive() and Rejoin.On and Rejoin.Server and Rejoin.Leaving and Rejoin.Token == disconnectToken do
                 pcall(function()
                     TeleportService:Teleport(game.PlaceId, LocalPlayer, (world ~= "") and { world = world } or nil)
                 end)
@@ -15012,29 +15060,33 @@ do (function()
         local okD, saved = pcall(HttpService.JSONDecode, HttpService, raw)
         if not okD or type(saved) ~= "table" or type(saved.world) ~= "string" or saved.world == "" then return end
         if os.time() - (tonumber(saved.at) or 0) > 15 * 60 then return end -- terlalu lama
+        Rejoin.Token += 1
+        local token = Rejoin.Token
+        local function live() return alive() and Rejoin.On and Rejoin.Token == token end
+        if not live() then return end
         Rejoin.Busy = true
         Rejoin.Status = "Rejoin: menunggu masuk " .. saved.world
         -- tunggu game masuk world (lewat data teleport); kalau tidak, masuk sendiri
         local t0 = os.clock()
         local tried = false
-        while alive() and os.clock() - t0 < 60 do
+        while live() and os.clock() - t0 < 60 do
             if Refs.World and Guard.worldName() == saved.world and Auto.here() then break end
             if not Refs.World then pcall(reconnectFn) end
             if Refs.World and not tried and os.clock() - t0 > 12 then
                 tried = true
-                Guard.enterWorld(saved.world)
+                Guard.enterWorld(saved.world, live)
             end
             task.wait(2)
         end
-        if alive() and Guard.worldName() == saved.world then
+        if live() and ready(saved.world) then
             pcall(reconnectFn)
             task.wait(1)
-            resume(saved, "Rejoin server")
-        else
+            resume(saved, "Rejoin server", live)
+        elseif live() then
             Rejoin.Status = "Rejoin: gagal masuk " .. saved.world
             Hook.send("rejoin", Rejoin.Status)
         end
-        Rejoin.Busy = false
+        if Rejoin.Token == token then Rejoin.Busy = false end
     end
 end)() end
 
@@ -15251,7 +15303,7 @@ end)
 
 -- ===== KONEKSI: AUTO RECONNECT =====
 do (function()
-    local rBox = box(ConnTab, "Auto Reconnect", false)
+    local rBox = box(ConnTab, "Auto Rejoin", false)
 
     safe(function()
         UI.RejoinStatus = rBox:Paragraph({ Title = "Status", Desc = Rejoin.Status })
@@ -15259,10 +15311,10 @@ do (function()
 
     safe(function()
         rBox:Toggle({
-            Title = "Auto Reconnect",
-            Desc = "Masuk lagi & lanjut aktivitas kalau terlempar",
+            Title = "Auto Rejoin",
+            Desc = "Keluar world: masuk world terakhir, lalu lanjut aktivitas sebelumnya",
             Value = Rejoin.On,
-            Callback = function(on) Rejoin.On = on end,
+            Callback = function(on) Rejoin.set(on) end,
         })
     end)
 
@@ -15271,16 +15323,22 @@ do (function()
             Title = "Terlempar dari world",
             Desc = "World ditutup / di-kick: masuk lagi ke world yang sama",
             Value = Rejoin.World,
-            Callback = function(on) Rejoin.World = on end,
+            Callback = function(on)
+                Rejoin.World = on
+                if not on then Rejoin.cancel() end
+            end,
         })
     end)
 
     safe(function()
-        rBox:Toggle({
+        UI.RejoinKeepToggle = rBox:Toggle({
             Title = "Selalu kembali ke world",
             Desc = "Kalau berada di luar world (layar pilih world), masuk lagi otomatis",
             Value = Rejoin.Keep,
-            Callback = function(on) Rejoin.Keep = on end,
+            Callback = function(on)
+                Rejoin.Keep = on
+                if not on then Rejoin.cancel() end
+            end,
         })
     end)
 
@@ -15290,7 +15348,10 @@ do (function()
             Desc = "Kosongkan = world terakhir yang kamu masuki",
             Value = Rejoin.Target,
             Placeholder = "NAMAWORLD",
-            Callback = function(text) Rejoin.Target = tostring(text or "") end,
+            Callback = function(text)
+                Rejoin.cancel()
+                Rejoin.Target = tostring(text or "")
+            end,
         })
     end)
 
@@ -15499,6 +15560,7 @@ Session.Cleanup = function()
     Bonus.Quest, Bonus.Redeem = false, false
     Scan.Auto = false
     Splice.Running = false
+    Rejoin.cancel()
     Rejoin.On = false
     Pabrik.Running = false
     Build.Running = false

@@ -7536,7 +7536,7 @@ local function farmerWorkInReach(s)
     if FC.batch then return Move.farmerArea(s) end
     local w = Refs.World
     local W = w.w
-    local R = farmReach() - 0.08
+    local R = (FC.pabrikHarvest and punchReach() or farmReach()) - 0.08
     local cx, cy = s.x, s.y - 0.475
     local now = os.clock()
     local st = workspace:GetServerTimeNow()
@@ -7551,7 +7551,7 @@ local function farmerWorkInReach(s)
                     local id = fgIdAt(tx, ty)
                     if id ~= 0 and fcHarvestOk(tx, ty) and (not FC.only or id == FC.only) then
                         local ra = treeReadyAt(tx, ty, id)
-                        if ra and st >= ra and Move.los(bx, by, tx, ty) then
+                        if ra and st >= ra and (FC.pabrikHarvest or Move.los(bx, by, tx, ty)) then
                             if canWorkAt(tx, ty) then
                                 harvest[#harvest + 1] = { x = tx, y = ty, idx = idx, id = id, readyAt = ra }
                             else
@@ -8178,7 +8178,7 @@ local function fieldStep()
         if refill == "cancelled" then return "wait" end
     end
     local R = FC.batch and math.max(FC.harvest and punchReach() or 0, FC.plant and buildReach() or 0) - 0.35
-        or farmReach() - 0.35
+        or (FC.pabrikHarvest and punchReach() or farmReach()) - 0.35
     local useBlock = scaffoldId() ~= nil
     local sx, sy = startNode(s)
     local px, py = floor(s.x), floor(s.y - 0.475)
@@ -8195,7 +8195,7 @@ local function fieldStep()
     end
     -- Fokus panen memakai jangkauan asli ke segala arah, termasuk beda baris.
     -- Mode tanam tetap mendekati baris pohon untuk mengambil hasil panennya.
-    targets.los = targets[1].kind == "harvest" and not FC.focusHarvest
+    targets.los = targets[1].kind == "harvest" and not (FC.focusHarvest or FC.pabrikHarvest)
     if targets[1].kind == "plant" then targets.cancel = FC.yieldHarvest end
     travelGroup(sx, sy, targets, R, useBlock, FC.skip, FarmerFail)
     return "move"
@@ -8795,6 +8795,7 @@ local function pabrikCfg(o, harvest, plant)
     return {
         run = o.live,
         harvest = harvest,
+        pabrikHarvest = harvest, -- jangkauan dan jalur panen Pabrik
         plant = plant and invCount(o.seed) > 0,
         seed = o.seed,
         skip = Pabrik.Skip,
@@ -9340,6 +9341,17 @@ local function pabrikLoop(runId)
     while live() do
         task.wait()
         o.whole = Pabrik.WholeWorld
+        if not Refs.Trees then
+            Pabrik.Status = "Mencari data waktu pohon; panen belum dapat diperiksa"
+            if os.clock() >= (o.nextTreeScan or 0) then
+                o.nextTreeScan = os.clock() + 10
+                pcall(findTreeRefs)
+            end
+            if not Refs.Trees then
+                if not waitAuto(500) then break end
+                continue
+            end
+        end
         local here = Guard.worldName()
         if not Pabrik.Traveling and Pabrik.Home ~= "" and here ~= Pabrik.Home then
             Pabrik.Status = "Bukan di world pabrik (" .. Pabrik.Home .. "), menunggu..."

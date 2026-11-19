@@ -189,7 +189,6 @@ local MENU_ICONS={
     tools={paths={{13,2,15.5,8.5,22,11,15.5,13.5,13,20,10.5,13.5,4,11,10.5,8.5,13,2},{4,2,4,6},{2,4,6,4}}},
 }
 MENU_ICONS.connection={paths={{7,2,7,7},{17,2,17,7},{5,7,19,7,19,12,16,16,8,16,5,12,5,7},{12,16,12,22}}}
-MENU_ICONS.rejoin={paths={{20,7,17,4,12,3,7,4,3,8,3,14,7,19,12,21,18,19,21,15},{20,2,20,7,15,7}}}
 MENU_ICONS.discord={paths={{4,17,6,14,6,9,8,5,12,3,16,5,18,9,18,14,20,17,4,17},{9,21,15,21}}}
 
 local ICON_ALIASES={farming="farmer",items="inventory",system="settings"}
@@ -260,8 +259,7 @@ local PAGES = {
     bonus={title="Bonus",subtitle="Quest, redeem dan kode bonus.",nodes={}},
     security={title="Keamanan",subtitle="Penjaga dan pengaturan respons sesi.",nodes={}},
     settings={title="Setelan",subtitle="Tampilan, karakter dan opsi performa.",nodes={}},
-    connection={title="Koneksi",subtitle="Hubungkan data game dan konfigurasi.",nodes={}},
-    rejoin={title="Auto Rejoin",subtitle="Kembali ke world terakhir dan lanjutkan aktivitas sebelumnya.",nodes={}},
+    connection={title="Koneksi",subtitle="Hubungkan data game, konfigurasi dan auto reconnect.",nodes={}},
     discord={title="Discord",subtitle="Atur notifikasi webhook dan laporan statistik.",nodes={}},
     stats={title="Statistik",subtitle="Catatan hasil aktivitas sesi ini.",nodes={}},
     key={title="Akun & Key",subtitle="Informasi akun dan status konfigurasi lisensi.",nodes={}},
@@ -273,7 +271,6 @@ local GROUPS={
     {id="items",title="Item",mark="I",pages={"inventory","vending"}},
     {id="proxy",title="Proxy",mark="P",pages={"proxy"}},
     {id="tools",title="Utilitas",mark="U",pages={"chat","bonus","security"}},
-    {id="rejoin",title="Auto Rejoin",direct="rejoin",pages={"rejoin"}},
     {id="system",title="Sistem",mark="S",pages={"settings","connection","discord","stats","key","updates"}},
 }
 Session.Pages=PAGES
@@ -470,7 +467,7 @@ Session.Mounted={}
 Session.RegistrationErrors={}
 local route={Farm="farm",Farmer="farmer",Pabrik="pabrik",["Dirt Farm"]="dirt",["Clear World"]="clear",Splice="splice",
     ["Titik Drop"]="drop",Growscan="growscan",Tas="inventory",Vending="vending",["Auto Chat"]="chat",Bonus="bonus",
-    Penjaga="security",Pengaturan="settings",Statistik="stats",Koneksi="connection",Discord="discord",["Auto Rejoin"]="rejoin"}
+    Penjaga="security",Pengaturan="settings",Statistik="stats",Koneksi="connection",Discord="discord"}
 local function copyValue(v)
     return type(v)=="table" and table.clone(v) or v
 end
@@ -1169,9 +1166,6 @@ function UI.navigation()
     end
     navButton("Ringkasan","overview")
     for _,g in ipairs(GROUPS) do
-        if g.direct then
-            navButton(g.title,g.direct,g.id)
-        else
         local section=g
         local expanded=UI.Group==g.id
         local b=button(nav,g.title.."   "..(expanded and "−" or "+"),UDim2.new(1,0,0,39),nil,false,false)
@@ -1188,7 +1182,6 @@ function UI.navigation()
             UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
-        end
     end
     label(nav,"PREMIUM  •  P15",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
@@ -1301,7 +1294,7 @@ function Session.Cleanup()
 end
 UI.layout();UI.show("overview")
 
-Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-rejoin-pabrik-2"
+Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-rejoin-1"
 return Session
 
 end)()
@@ -1766,7 +1759,6 @@ local Vend = {
 -- Pabrik: break block -> tanam seed -> panen -> break lagi, seed lebihan di-drop
 local Pabrik = {
     Running = false,
-    Fast = true,         -- target dekat, jalur lurus, jeda aksi 140 ms
     SeedId = nil,
     BlockId = nil,
     WholeWorld = false,  -- tanam & panen di seluruh world (bukan hanya lahan)
@@ -2759,7 +2751,7 @@ Config.add("Lahan", Land, { "X0", "X1", "Y0" })
 Config.add("Bangun", Build, { "BlockId", "ThenPabrik", "BreakX", "BreakY", "Tiles" })
 Config.add("Vending", Vend, { "Mode", "Point", "Items", "DropX", "DropY" })
 Config.add("Pabrik", Pabrik, {
-    "Fast", "SeedId", "WholeWorld", "Tiles", "BreakX", "BreakY",
+    "SeedId", "WholeWorld", "Tiles", "BreakX", "BreakY",
     "Drop", "Keep", "DropAt", "DropWorld", "DropX", "DropY",
 })
 Config.add("PremiumUI", Premium.Values, { "ui.theme", "ui.scale", "ui.notifications", "ui.transparency", "ui.layoutRevision" })
@@ -5757,14 +5749,13 @@ local function steerX(s, targetX, tol)
 end
 
 -- Jalan sampai berdiri di tengah tile tujuan
-local function execWalk(tx, ty, cancel)
+local function execWalk(tx, ty)
     local cx = tx + 0.5
     local s0 = playerState()
     if not s0 then return false end
     local limit = 1.5 + abs(cx - s0.x) * 0.35
     local t0 = os.clock()
     while frame() do
-        if cancel and cancel() then releaseInput(); return false, "cancelled" end
         local s = playerState()
         if not s or s.dead then return false end
         local nx, ny = floor(s.x), floor(s.y - 0.475)
@@ -5979,7 +5970,7 @@ local function execPillar(e)
     return false
 end
 
-local function followPath(path, cancel, smooth)
+local function followPath(path, cancel)
     local i = 1
     while i <= #path do
         if not autoOn() then return false end
@@ -5989,11 +5980,7 @@ local function followPath(path, cancel, smooth)
         if e.kind == "walk" then
             -- langkah searah digabung jadi satu gerakan
             local dir = e.x - e.fx
-            while (not cancel or smooth) and path[last + 1] and path[last + 1].kind == "walk"
-                and (path[last + 1].x - path[last + 1].fx) == dir
-                and path[last + 1].y == e.y and path[last + 1].fy == e.y
-                and path[last + 1].fx == path[last].x
-                and (not smooth or (not path[last].build and not path[last + 1].build)) do
+            while not cancel and path[last + 1] and path[last + 1].kind == "walk" and (path[last + 1].x - path[last + 1].fx) == dir do
                 last += 1
             end
             local anyBuild = false
@@ -6022,7 +6009,7 @@ local function followPath(path, cancel, smooth)
                 end
             else
                 setMoveStatus(("Jalan ke (%d,%d)"):format(path[last].x, path[last].y))
-                ok = execWalk(path[last].x, path[last].y, smooth and cancel or nil)
+                ok = execWalk(path[last].x, path[last].y)
             end
         elseif e.kind == "pillar" then
             setMoveStatus(("Naik pakai block ke (%d,%d)"):format(e.x, e.y))
@@ -6065,16 +6052,9 @@ local function travelGroup(sx, sy, group, R, useBlock, skipTbl, failTbl)
     if group.cancel and group.cancel() then releaseInput(); return false, "cancelled" end
     if path then
         if #path == 0 then
-            local cur = playerState()
-            if group.smooth and cur and abs(cur.x - (sx + 0.5)) > 0.08 then
-                local ok, why = execWalk(sx, sy, group.cancel)
-                releaseInput()
-                if why == "cancelled" then return false, why end
-                if ok then return true end
-            end
-            for _, t in ipairs(group) do skipTile(skipTbl, t.idx, group.smooth and 2 or 20) end
+            for _, t in ipairs(group) do skipTile(skipTbl, t.idx, 20) end
         else
-            local ok, why = followPath(path, group.cancel, group.smooth)
+            local ok, why = followPath(path, group.cancel)
             if why == "cancelled" then return false, why end
             if not ok then
                 failTbl[first.idx] = (failTbl[first.idx] or 0) + 1
@@ -7649,8 +7629,7 @@ local function farmerWorkInReach(s)
     if FC.batch then return Move.farmerArea(s) end
     local w = Refs.World
     local W = w.w
-    local R = (FC.pabrikFast and (FC.harvest and punchReach() or buildReach())
-        or (FC.pabrikHarvest and punchReach() or farmReach())) - 0.08
+    local R = (FC.pabrikHarvest and punchReach() or farmReach()) - 0.08
     local cx, cy = s.x, s.y - 0.475
     local now = os.clock()
     local st = workspace:GetServerTimeNow()
@@ -7685,18 +7664,10 @@ local function farmerWorkInReach(s)
         return a.y < b.y
     end
     table.sort(harvest, function(a, b)
-        if FC.pabrikFast then
-            local da = (a.x - cx)^2 + 1.69 * (a.y - cy)^2
-            local db = (b.x - cx)^2 + 1.69 * (b.y - cy)^2
-            if da ~= db then return da < db end
-        end
         if a.readyAt ~= b.readyAt then return a.readyAt < b.readyAt end
         return byX(a, b)
     end)
-    table.sort(plant, function(a, b)
-        if FC.pabrikFast and FC.row and FC.row.dir == -1 and a.x ~= b.x then return a.x > b.x end
-        return byX(a, b)
-    end)
+    table.sort(plant, byX)
 
     local done, got = 0, 0
     for _, t in ipairs(harvest) do
@@ -7704,8 +7675,6 @@ local function farmerWorkInReach(s)
         local cur = playerState()
         if not cur or not stateReaches(cur, t.x, t.y, R) then break end
         local id = t.id
-        local began = os.clock()
-        if FC.harvestRoom and not FC.harvestRoom() then return done end
         local harvested, why = Move.harvestTree(t.x, t.y, id, R)
         if harvested then
             FC.onHarvest(id)
@@ -7720,9 +7689,7 @@ local function farmerWorkInReach(s)
             end
         end
         done += 1
-        -- Confirmation time already counts toward the action interval.
-        local rest = FC.pabrikFast and math.max(0, FC.hms - (os.clock() - began) * 1000) or FC.hms
-        if rest > 0 and not waitAuto(rest) then return done end
+        if not waitAuto(FC.hms) then return done end
     end
     -- ambil hasil panen dulu sebelum pindah / tanam
     if got > 0 and FC.collect then
@@ -7909,7 +7876,7 @@ local function farmerScan(px, py, maxN, filter)
     local st = workspace:GetServerTimeNow()
     local nextReady = nil
     local function earlier(a, b)
-        if (FC.focusHarvest or FC.pabrikFast) and a.d ~= b.d then return a.d < b.d end
+        if FC.focusHarvest and a.d ~= b.d then return a.d < b.d end
         if a.readyAt ~= b.readyAt then return a.readyAt < b.readyAt end
         if a.d ~= b.d then return a.d < b.d end
         return a.idx < b.idx
@@ -7983,13 +7950,7 @@ local function farmerScan(px, py, maxN, filter)
     end)
     for _, y in ipairs(order) do
         local list = rows[y]
-        table.sort(list, function(a, b) return a.x < b.x end)
-        if FC.pabrikFast and FC.row then
-            if FC.row.y ~= y or not FC.row.dir then
-                FC.row.dir = abs(list[1].x - px) <= abs(list[#list].x - px) and 1 or -1
-            end
-            if FC.row.dir < 0 then table.sort(list, function(a, b) return a.x > b.x end) end
-        end
+        table.sort(list, function(a, b) return a.x < b.x end) -- dari kiri ke kanan
         if FC.sweepPlant then
             local target = Move.farmerPlantTarget(FC, list, px, py)
             if target then return { target }, nextReady end
@@ -8310,8 +8271,7 @@ local function fieldStep()
         if refill == "cancelled" then return "wait" end
     end
     local R = FC.batch and math.max(FC.harvest and punchReach() or 0, FC.plant and buildReach() or 0) - 0.35
-        or (FC.pabrikFast and (FC.harvest and punchReach() or buildReach())
-            or (FC.pabrikHarvest and punchReach() or farmReach())) - 0.35
+        or (FC.pabrikHarvest and punchReach() or farmReach()) - 0.35
     local useBlock = scaffoldId() ~= nil
     local sx, sy = startNode(s)
     local px, py = floor(s.x), floor(s.y - 0.475)
@@ -8330,14 +8290,6 @@ local function fieldStep()
     -- Mode tanam tetap mendekati baris pohon untuk mengambil hasil panennya.
     targets.los = targets[1].kind == "harvest" and not (FC.focusHarvest or FC.pabrikHarvest)
     if targets[1].kind == "plant" then targets.cancel = FC.yieldHarvest end
-    if FC.pabrikFast then
-        local cfg, pending = FC, targets.cancel
-        targets.smooth = true
-        targets.cancel = function()
-            return FC ~= cfg or Refs.World ~= w or not cfg.run() or not alive()
-                or (pending and pending())
-        end
-    end
     travelGroup(sx, sy, targets, R, useBlock, FC.skip, FarmerFail)
     return "move"
 end
@@ -8936,20 +8888,18 @@ local function pabrikCfg(o, harvest, plant)
     return {
         run = o.live,
         harvest = harvest,
-        pabrikFast = Pabrik.Fast,
         pabrikHarvest = harvest, -- jangkauan dan jalur panen Pabrik
         plant = plant and invCount(o.seed) > 0,
         seed = o.seed,
         skip = Pabrik.Skip,
-        hms = Pabrik.Fast and 140 or Farmer.HarvestMs,
-        pms = Pabrik.Fast and 140 or Farmer.PlantMs,
+        hms = Farmer.HarvestMs,
+        pms = Farmer.PlantMs,
         area = area,
         plantSet = plantSet,
         exclude = o.exclude,
         row = Pabrik.Row,
         collect = not harvest, -- panen dahulu; perjalanan ambil block punya fase sendiri
         status = function(t) Pabrik.Status = t end,
-        harvestRoom = function() return invCount(o.seed) < CAP - 20 and invCount(o.block) < CAP - 20 end,
         onHarvest = function() Pabrik.Harvested += 1 end,
         onPlant = function() Pabrik.Planted += 1 end,
         yieldHarvest = (not harvest and plant) and function() return Pabrik.wantHarvest(o) end or nil,
@@ -14695,15 +14645,6 @@ do (function()
     end)
 
     safe(function()
-        pCtl:Toggle({
-            Title = "Pabrik lebih cepat",
-            Desc = "Dahulukan target dekat, jalan lurus lebih lancar, dan kurangi jeda tambahan",
-            Value = Pabrik.Fast,
-            Callback = function(on) Pabrik.Fast = on; table.clear(Pabrik.Row) end,
-        })
-    end)
-
-    safe(function()
         UI.PabrikSeedDropdown = pCtl:Dropdown({
             Title = "Seed pabrik",
             Desc = "Block-nya otomatis (contoh: Dirt Seed -> Dirt)",
@@ -15362,8 +15303,7 @@ end)
 
 -- ===== KONEKSI: AUTO RECONNECT =====
 do (function()
-    local RejoinTab = makeTab("Auto Rejoin", "rotate-cw", "setel")
-    local rBox = box(RejoinTab, "Auto Rejoin", true)
+    local rBox = box(ConnTab, "Auto Rejoin", false)
 
     safe(function()
         UI.RejoinStatus = rBox:Paragraph({ Title = "Status", Desc = Rejoin.Status })

@@ -62,12 +62,168 @@ do
     Boot.Show(Boot.Stage)
 end
 
+-- Zekio licensing: the server stores only key hashes. No admin secret belongs here.
+local License = {
+    Endpoint = "https://zekio-supreme-keys-billskyyy.marooncamellia8.chatgpt.site/api/v1/validate",
+    Valid = false, Cancelled = false, Busy = false, Remember = true, Deadline = 0,
+    Plan = "", ExpiresAt = nil, Token = 0, Key = "", Message = "Masukkan key premium dari admin Zekio Supreme.",
+}
+function License.accept(data, uid)
+    if type(data) ~= "table" or data.valid ~= true or tostring(data.userId) ~= tostring(uid)
+        or type(data.serverTime) ~= "number" or type(data.leaseSeconds) ~= "number"
+        or data.leaseSeconds <= 0 or data.leaseSeconds > 120 then return false end
+    if data.expiresAt ~= nil then
+        if type(data.expiresAt) ~= "number" or data.expiresAt <= data.serverTime then return false end
+    end
+    local lifetime = data.leaseSeconds
+    if type(data.expiresAt) == "number" then lifetime = math.min(lifetime, data.expiresAt - data.serverTime) end
+    License.Deadline = os.clock() + lifetime
+    License.Plan = tostring(data.plan or "Premium")
+    License.ExpiresAt = type(data.expiresAt) == "number" and data.expiresAt or nil
+    License.Valid = true
+    return true
+end
+function License.description()
+    return "Lisensi aktif • " .. License.Plan .. "\nAkun Roblox: " .. tostring(game:GetService("Players").LocalPlayer.UserId)
+        .. "\nBerakhir: " .. (License.ExpiresAt and os.date("!%d-%m-%Y %H:%M UTC", License.ExpiresAt) or "Permanen")
+end
+function License.clearCache()
+    if License.Path and type(delfile) == "function" then pcall(delfile, License.Path) end
+end
+function License.request(key, action)
+    local requestFn = request or http_request or (syn and syn.request) or (http and http.request)
+    if type(requestFn) ~= "function" then return nil, "Executor tidak menyediakan HTTP request.", true end
+    local httpService = game:GetService("HttpService")
+    local uid = tostring(game:GetService("Players").LocalPlayer.UserId)
+    local result, finished = nil, false
+    task.spawn(function()
+        local ok, response = pcall(requestFn, {
+            Url = License.Endpoint, Method = "POST", Headers = { ["Content-Type"] = "application/json" },
+            Body = httpService:JSONEncode({ key = key, userId = uid, action = action }),
+        })
+        result = {ok, response}; finished = true
+    end)
+    local started = os.clock()
+    while not finished and not License.Cancelled and os.clock() - started < 15 do task.wait(0.1) end
+    if not finished then return nil, "Server validasi belum merespons. Coba lagi.", false end
+    if not result[1] or type(result[2]) ~= "table" then return nil, "Koneksi server key gagal.", false end
+    local response = result[2]
+    local status = tonumber(response.StatusCode or response.Status) or 0
+    local ok, data = pcall(httpService.JSONDecode, httpService, response.Body or "")
+    if status == 200 and ok and type(data) == "table" then return data end
+    if status == 401 or status == 403 then
+        return nil, ok and type(data) == "table" and tostring(data.error or "Key ditolak.")
+            or "API key masih privat atau akses key ditolak. Hubungi admin.", true
+    end
+    if status == 429 then return nil, "Terlalu banyak percobaan. Tunggu satu menit.", false end
+    return nil, "Server key belum siap atau tidak dapat diakses. Hubungi admin.", false
+end
+function License.open()
+    local players = game:GetService("Players")
+    local player = players.LocalPlayer
+    if not player then return false end
+    License.Path = "ZekioSupremePremium/license_" .. tostring(player.UserId) .. ".txt"
+    local old = Boot.G.__ZekioLicense
+    if type(old) == "table" and type(old.Close) == "function" then pcall(old.Close) end
+    Boot.G.__ZekioLicense = License
+    Boot.Close()
+    local gui = Instance.new("ScreenGui")
+    gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "ZekioLicense", false, 2000001
+    local parent = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 15)
+    if type(gethui) == "function" then local ok, root = pcall(gethui); if ok and root then parent = root end end
+    local attached = pcall(function() gui.Parent = parent end)
+    if not attached then gui.Parent = player:FindFirstChildOfClass("PlayerGui") end
+    local connections = {}
+    function License.Close()
+        License.Cancelled = true; License.Token += 1
+        for _, connection in ipairs(connections) do pcall(function() connection:Disconnect() end) end
+        gui:Destroy()
+    end
+    local function make(kind, props, target)
+        local item = Instance.new(kind)
+        for k,v in pairs(props) do item[k] = v end
+        item.Parent = target; return item
+    end
+    local card = make("Frame", { Size = UDim2.new(0.88, 0, 0, 340), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(24, 20, 33), BorderSizePixel = 0 }, gui)
+    make("UISizeConstraint", { MaxSize = Vector2.new(460, 340) }, card)
+    make("UICorner", { CornerRadius = UDim.new(0, 16) }, card)
+    make("UIStroke", { Color = Color3.fromRGB(108, 80, 149), Thickness = 1 }, card)
+    local function text(content, y, height, size, color)
+        return make("TextLabel", { Text = content, Position = UDim2.new(0, 22, 0, y), Size = UDim2.new(1, -44, 0, height),
+            TextSize = size, Font = Enum.Font.Gotham, TextColor3 = color or Color3.fromRGB(238, 232, 248),
+            TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, BackgroundTransparency = 1 }, card)
+    end
+    text("ZS  ·  ZEKIO SUPREME", 18, 30, 19, Color3.fromRGB(190, 153, 255))
+    text("Aktivasi Premium", 56, 30, 23)
+    text("Satu key untuk satu akun Roblox.", 90, 24, 14, Color3.fromRGB(166, 156, 182))
+    local input = make("TextBox", { PlaceholderText = "Masukkan key ZS-…", Text = "", ClearTextOnFocus = false,
+        TextSize = 14, Font = Enum.Font.Code, TextColor3 = Color3.fromRGB(235, 222, 252),
+        BackgroundColor3 = Color3.fromRGB(15, 12, 22), Position = UDim2.new(0, 22, 0, 128),
+        Size = UDim2.new(1, -44, 0, 44), BorderSizePixel = 0 }, card)
+    make("UICorner", { CornerRadius = UDim.new(0, 8) }, input)
+    local remember = make("TextButton", { Text = "✓ Simpan key di perangkat ini", TextSize = 13, Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Color3.fromRGB(180, 166, 202), BackgroundTransparency = 1,
+        Position = UDim2.new(0, 22, 0, 180), Size = UDim2.new(1, -44, 0, 26) }, card)
+    local statusLabel = text(License.Message, 211, 48, 13, Color3.fromRGB(182, 169, 204))
+    local submit = make("TextButton", { Text = "Aktifkan Premium", TextSize = 15, Font = Enum.Font.GothamBold,
+        TextColor3 = Color3.fromRGB(36, 23, 52), BackgroundColor3 = Color3.fromRGB(182, 148, 244),
+        Position = UDim2.new(0, 22, 0, 275), Size = UDim2.new(1, -44, 0, 43), BorderSizePixel = 0 }, card)
+    make("UICorner", { CornerRadius = UDim.new(0, 8) }, submit)
+    local close = make("TextButton", { Text = "×", TextSize = 22, BackgroundTransparency = 1,
+        TextColor3 = Color3.fromRGB(180, 166, 202), Position = UDim2.new(1, -42, 0, 10), Size = UDim2.fromOffset(32, 32) }, card)
+    table.insert(connections, close.MouseButton1Click:Connect(License.Close))
+    table.insert(connections, remember.MouseButton1Click:Connect(function()
+        License.Remember = not License.Remember
+        remember.Text = (License.Remember and "✓ " or "○ ") .. "Simpan key di perangkat ini"
+        if not License.Remember then License.clearCache() end
+    end))
+    local function activate()
+        if License.Busy or License.Cancelled then return end
+        local key = tostring(input.Text):gsub("%s", ""):upper()
+        if #key ~= 51 or not key:match("^ZS%-%x+$") then statusLabel.Text = "Format key tidak valid. Salin key lengkap dari admin."; return end
+        License.Busy = true; submit.Text = "Memeriksa key…"
+        local token = License.Token
+        task.spawn(function()
+            local data, message, rejected = License.request(key, "activate")
+            if token ~= License.Token or License.Cancelled then return end
+            if data and License.accept(data, player.UserId) then
+                License.Key = key
+                if License.Remember and type(writefile) == "function" then
+                    if type(makefolder) == "function" then pcall(makefolder, "ZekioSupremePremium") end
+                    pcall(writefile, License.Path, key)
+                else License.clearCache() end
+                statusLabel.Text = "Lisensi aktif. Membuka premium…"
+            else
+                if rejected then License.clearCache() end
+                statusLabel.Text = message or "Balasan server tidak valid. Coba lagi."
+                submit.Text = "Coba lagi"
+            end
+            License.Busy = false
+        end)
+    end
+    table.insert(connections, submit.MouseButton1Click:Connect(activate))
+    table.insert(connections, input.FocusLost:Connect(function(enter) if enter then activate() end end))
+    if type(readfile) == "function" then
+        local ok, cached = pcall(readfile, License.Path)
+        if ok and type(cached) == "string" and #cached == 51 then input.Text = cached; activate() end
+    end
+    while not License.Valid and not License.Cancelled do task.wait(0.1) end
+    for _, connection in ipairs(connections) do pcall(function() connection:Disconnect() end) end
+    gui:Destroy()
+    return License.Valid and not License.Cancelled
+end
+local licenseOK, licensed = pcall(License.open)
+if not licenseOK then Boot.Fail("Layar aktivasi tidak dapat dibuka. Jalankan ulang script."); return end
+if not licensed then return end
+-- LICENSE_GATE_END
+
 local Premium
 local uiOk, uiError = xpcall(function()
 Premium=(function()
 -- Zekio Supreme Premium | P15 FULL
 -- Native premium UI with the r29 Farm repair.
--- License provider is not configured in this build.
+-- License activation is verified before premium callbacks start.
 local G = Boot.G
 local Session = { Connections = {}, PageConnections = {}, Values = {}, Controls = {}, Sections = {}, SectionButtons = {}, Closed = false }
 G.__ZekioPremiumUI = Session
@@ -189,6 +345,7 @@ local MENU_ICONS={
     tools={paths={{13,2,15.5,8.5,22,11,15.5,13.5,13,20,10.5,13.5,4,11,10.5,8.5,13,2},{4,2,4,6},{2,4,6,4}}},
 }
 MENU_ICONS.connection={paths={{7,2,7,7},{17,2,17,7},{5,7,19,7,19,12,16,16,8,16,5,12,5,7},{12,16,12,22}}}
+MENU_ICONS.rejoin={paths={{20,7,17,4,12,3,7,4,3,8,3,14,7,19,12,21,18,19,21,15},{20,2,20,7,15,7}}}
 MENU_ICONS.discord={paths={{4,17,6,14,6,9,8,5,12,3,16,5,18,9,18,14,20,17,4,17},{9,21,15,21}}}
 
 local ICON_ALIASES={farming="farmer",items="inventory",system="settings"}
@@ -259,7 +416,8 @@ local PAGES = {
     bonus={title="Bonus",subtitle="Quest, redeem dan kode bonus.",nodes={}},
     security={title="Keamanan",subtitle="Penjaga dan pengaturan respons sesi.",nodes={}},
     settings={title="Setelan",subtitle="Tampilan, karakter dan opsi performa.",nodes={}},
-    connection={title="Koneksi",subtitle="Hubungkan data game, konfigurasi dan auto reconnect.",nodes={}},
+    connection={title="Koneksi",subtitle="Hubungkan data game dan konfigurasi.",nodes={}},
+    rejoin={title="Auto Rejoin",subtitle="Kembali ke world terakhir dan lanjutkan aktivitas sebelumnya.",nodes={}},
     discord={title="Discord",subtitle="Atur notifikasi webhook dan laporan statistik.",nodes={}},
     stats={title="Statistik",subtitle="Catatan hasil aktivitas sesi ini.",nodes={}},
     key={title="Akun & Key",subtitle="Informasi akun dan status konfigurasi lisensi.",nodes={}},
@@ -271,6 +429,7 @@ local GROUPS={
     {id="items",title="Item",mark="I",pages={"inventory","vending"}},
     {id="proxy",title="Proxy",mark="P",pages={"proxy"}},
     {id="tools",title="Utilitas",mark="U",pages={"chat","bonus","security"}},
+    {id="rejoin",title="Auto Rejoin",direct="rejoin",pages={"rejoin"}},
     {id="system",title="Sistem",mark="S",pages={"settings","connection","discord","stats","key","updates"}},
 }
 Session.Pages=PAGES
@@ -467,7 +626,7 @@ Session.Mounted={}
 Session.RegistrationErrors={}
 local route={Farm="farm",Farmer="farmer",Pabrik="pabrik",["Dirt Farm"]="dirt",["Clear World"]="clear",Splice="splice",
     ["Titik Drop"]="drop",Growscan="growscan",Tas="inventory",Vending="vending",["Auto Chat"]="chat",Bonus="bonus",
-    Penjaga="security",Pengaturan="settings",Statistik="stats",Koneksi="connection",Discord="discord"}
+    Penjaga="security",Pengaturan="settings",Statistik="stats",Koneksi="connection",Discord="discord",["Auto Rejoin"]="rejoin"}
 local function copyValue(v)
     return type(v)=="table" and table.clone(v) or v
 end
@@ -745,7 +904,7 @@ function Session.SetEngineReady()
     local summary=#Session.RegistrationErrors==0 and "Menu siap" or ("Menu dimuat; "..#Session.RegistrationErrors.." bagian gagal dibuat")
     local connection = Session.ConnectionError and ("\nKoneksi gagal: "..Session.ConnectionError)
         or "\nPeriksa tab Koneksi bila data game belum terbaca."
-    bootModel:SetDesc(summary.." • "..count.." kontrol tersedia"..connection.."\nLisensi key belum dikonfigurasi.")
+    bootModel:SetDesc(summary.." • "..count.." kontrol tersedia"..connection.."\nLisensi aktif: " .. License.Plan)
     UI.show(UI.Page)
 end
 function Session.RecordRegistrationError(message)
@@ -1130,7 +1289,8 @@ end
 
 local account=builtin("key")
 account:Paragraph({Title="Akun",Desc=tostring(player.DisplayName or player.Name or "Pemain").."\nUsername: "..tostring(player.Name or "—").."\nUser ID: "..tostring(player.UserId or "—")})
-account:Paragraph({Title="Lisensi key",Desc="Sistem key belum dikonfigurasi. Build ini belum membatasi akses dengan key."})
+account:Paragraph({Title="Lisensi key",Desc=License.description()})
+account:Button({Title="Hapus key tersimpan",Desc="Aktivasi berikutnya meminta key lagi.",Callback=function() License.clearCache(); License.Remember=false; UI.notify("Key tersimpan dihapus.") end})
 builtin("updates"):Paragraph({Title="Premium P15",Desc="Proxy: pembaca event WheelSpun dan Fast Pull (percobaan).\nUkuran panel mengikuti UI lama dan latar sedikit transparan.\nFungsi versi utama r29 dihubungkan ke UI premium.\nFarm, Farmer, Pabrik, Dirt Farm, Clear World, collect dan drop seed.\nSplice, Vending, Tas, Growscan, Auto Chat, Bonus, Penjaga, konfigurasi, reconnect dan notifikasi Discord.\nMenu Teleport ID Door dihapus."})
 
 Session.EngineUI={}
@@ -1166,6 +1326,9 @@ function UI.navigation()
     end
     navButton("Ringkasan","overview")
     for _,g in ipairs(GROUPS) do
+        if g.direct then
+            navButton(g.title,g.direct,g.id)
+        else
         local section=g
         local expanded=UI.Group==g.id
         local b=button(nav,g.title.."   "..(expanded and "−" or "+"),UDim2.new(1,0,0,39),nil,false,false)
@@ -1182,6 +1345,7 @@ function UI.navigation()
             UI.navigation()
         end)
         if expanded then for _,id in ipairs(g.pages) do navButton("  "..PAGES[id].title,id,g.id) end end
+        end
     end
     label(nav,"PREMIUM  •  P15",11,"muted",{Size=UDim2.new(1,0,0,34)})
 end
@@ -1294,7 +1458,7 @@ function Session.Cleanup()
 end
 UI.layout();UI.show("overview")
 
-Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-rejoin-1"
+Session.LoaderURL="https://raw.githubusercontent.com/billskyy-hue/billskyyy/main/zekio_supreme_premium_ui.lua?v=premium-keys-1"
 return Session
 
 end)()
@@ -1315,6 +1479,37 @@ if not uiOk then
     return
 end
 Boot.Close()
+
+-- LICENSE_WATCH_BEGIN
+function License.watch(premium)
+    task.spawn(function()
+        local nextCheck = os.clock() + 45
+        local function live() return not premium.Closed and not License.Cancelled and Boot.G.__ZekioLicense == License end
+        local function stop(message)
+            License.Valid = false
+            License.clearCache()
+            if premium.Cleanup then pcall(premium.Cleanup) end
+            License.Close()
+            Boot.Fail("Lisensi: " .. message .. " Jalankan ulang untuk aktivasi.")
+        end
+        while live() do
+            if os.clock() >= License.Deadline then stop("Masa validasi habis atau server tidak dapat dihubungi."); return end
+            if os.clock() >= nextCheck then
+                local data, message, rejected = License.request(License.Key, "check")
+                if not live() then return end
+                if rejected then stop(message or "Akses dicabut."); return end
+                if data and License.accept(data, game:GetService("Players").LocalPlayer.UserId) then
+                    nextCheck = os.clock() + 45
+                else
+                    nextCheck = os.clock() + 10
+                end
+            end
+            task.wait(0.25)
+        end
+    end)
+end
+License.watch(Premium)
+-- LICENSE_WATCH_END
 
 -- PREMIUM_ENGINE_BEGIN
 task.spawn(function()
@@ -1759,6 +1954,7 @@ local Vend = {
 -- Pabrik: break block -> tanam seed -> panen -> break lagi, seed lebihan di-drop
 local Pabrik = {
     Running = false,
+    Fast = true,         -- target dekat, jalur lurus, jeda aksi 140 ms
     SeedId = nil,
     BlockId = nil,
     WholeWorld = false,  -- tanam & panen di seluruh world (bukan hanya lahan)
@@ -2751,7 +2947,7 @@ Config.add("Lahan", Land, { "X0", "X1", "Y0" })
 Config.add("Bangun", Build, { "BlockId", "ThenPabrik", "BreakX", "BreakY", "Tiles" })
 Config.add("Vending", Vend, { "Mode", "Point", "Items", "DropX", "DropY" })
 Config.add("Pabrik", Pabrik, {
-    "SeedId", "WholeWorld", "Tiles", "BreakX", "BreakY",
+    "Fast", "SeedId", "WholeWorld", "Tiles", "BreakX", "BreakY",
     "Drop", "Keep", "DropAt", "DropWorld", "DropX", "DropY",
 })
 Config.add("PremiumUI", Premium.Values, { "ui.theme", "ui.scale", "ui.notifications", "ui.transparency", "ui.layoutRevision" })
@@ -5749,13 +5945,14 @@ local function steerX(s, targetX, tol)
 end
 
 -- Jalan sampai berdiri di tengah tile tujuan
-local function execWalk(tx, ty)
+local function execWalk(tx, ty, cancel)
     local cx = tx + 0.5
     local s0 = playerState()
     if not s0 then return false end
     local limit = 1.5 + abs(cx - s0.x) * 0.35
     local t0 = os.clock()
     while frame() do
+        if cancel and cancel() then releaseInput(); return false, "cancelled" end
         local s = playerState()
         if not s or s.dead then return false end
         local nx, ny = floor(s.x), floor(s.y - 0.475)
@@ -5970,7 +6167,7 @@ local function execPillar(e)
     return false
 end
 
-local function followPath(path, cancel)
+local function followPath(path, cancel, smooth)
     local i = 1
     while i <= #path do
         if not autoOn() then return false end
@@ -5980,7 +6177,11 @@ local function followPath(path, cancel)
         if e.kind == "walk" then
             -- langkah searah digabung jadi satu gerakan
             local dir = e.x - e.fx
-            while not cancel and path[last + 1] and path[last + 1].kind == "walk" and (path[last + 1].x - path[last + 1].fx) == dir do
+            while (not cancel or smooth) and path[last + 1] and path[last + 1].kind == "walk"
+                and (path[last + 1].x - path[last + 1].fx) == dir
+                and path[last + 1].y == e.y and path[last + 1].fy == e.y
+                and path[last + 1].fx == path[last].x
+                and (not smooth or (not path[last].build and not path[last + 1].build)) do
                 last += 1
             end
             local anyBuild = false
@@ -6009,7 +6210,7 @@ local function followPath(path, cancel)
                 end
             else
                 setMoveStatus(("Jalan ke (%d,%d)"):format(path[last].x, path[last].y))
-                ok = execWalk(path[last].x, path[last].y)
+                ok = execWalk(path[last].x, path[last].y, smooth and cancel or nil)
             end
         elseif e.kind == "pillar" then
             setMoveStatus(("Naik pakai block ke (%d,%d)"):format(e.x, e.y))
@@ -6052,9 +6253,16 @@ local function travelGroup(sx, sy, group, R, useBlock, skipTbl, failTbl)
     if group.cancel and group.cancel() then releaseInput(); return false, "cancelled" end
     if path then
         if #path == 0 then
-            for _, t in ipairs(group) do skipTile(skipTbl, t.idx, 20) end
+            local cur = playerState()
+            if group.smooth and cur and abs(cur.x - (sx + 0.5)) > 0.08 then
+                local ok, why = execWalk(sx, sy, group.cancel)
+                releaseInput()
+                if why == "cancelled" then return false, why end
+                if ok then return true end
+            end
+            for _, t in ipairs(group) do skipTile(skipTbl, t.idx, group.smooth and 2 or 20) end
         else
-            local ok, why = followPath(path, group.cancel)
+            local ok, why = followPath(path, group.cancel, group.smooth)
             if why == "cancelled" then return false, why end
             if not ok then
                 failTbl[first.idx] = (failTbl[first.idx] or 0) + 1
@@ -7629,7 +7837,8 @@ local function farmerWorkInReach(s)
     if FC.batch then return Move.farmerArea(s) end
     local w = Refs.World
     local W = w.w
-    local R = (FC.pabrikHarvest and punchReach() or farmReach()) - 0.08
+    local R = (FC.pabrikFast and (FC.harvest and punchReach() or buildReach())
+        or (FC.pabrikHarvest and punchReach() or farmReach())) - 0.08
     local cx, cy = s.x, s.y - 0.475
     local now = os.clock()
     local st = workspace:GetServerTimeNow()
@@ -7664,10 +7873,18 @@ local function farmerWorkInReach(s)
         return a.y < b.y
     end
     table.sort(harvest, function(a, b)
+        if FC.pabrikFast then
+            local da = (a.x - cx)^2 + 1.69 * (a.y - cy)^2
+            local db = (b.x - cx)^2 + 1.69 * (b.y - cy)^2
+            if da ~= db then return da < db end
+        end
         if a.readyAt ~= b.readyAt then return a.readyAt < b.readyAt end
         return byX(a, b)
     end)
-    table.sort(plant, byX)
+    table.sort(plant, function(a, b)
+        if FC.pabrikFast and FC.row and FC.row.dir == -1 and a.x ~= b.x then return a.x > b.x end
+        return byX(a, b)
+    end)
 
     local done, got = 0, 0
     for _, t in ipairs(harvest) do
@@ -7675,6 +7892,8 @@ local function farmerWorkInReach(s)
         local cur = playerState()
         if not cur or not stateReaches(cur, t.x, t.y, R) then break end
         local id = t.id
+        local began = os.clock()
+        if FC.harvestRoom and not FC.harvestRoom() then return done end
         local harvested, why = Move.harvestTree(t.x, t.y, id, R)
         if harvested then
             FC.onHarvest(id)
@@ -7689,7 +7908,9 @@ local function farmerWorkInReach(s)
             end
         end
         done += 1
-        if not waitAuto(FC.hms) then return done end
+        -- Confirmation time already counts toward the action interval.
+        local rest = FC.pabrikFast and math.max(0, FC.hms - (os.clock() - began) * 1000) or FC.hms
+        if rest > 0 and not waitAuto(rest) then return done end
     end
     -- ambil hasil panen dulu sebelum pindah / tanam
     if got > 0 and FC.collect then
@@ -7876,7 +8097,7 @@ local function farmerScan(px, py, maxN, filter)
     local st = workspace:GetServerTimeNow()
     local nextReady = nil
     local function earlier(a, b)
-        if FC.focusHarvest and a.d ~= b.d then return a.d < b.d end
+        if (FC.focusHarvest or FC.pabrikFast) and a.d ~= b.d then return a.d < b.d end
         if a.readyAt ~= b.readyAt then return a.readyAt < b.readyAt end
         if a.d ~= b.d then return a.d < b.d end
         return a.idx < b.idx
@@ -7950,7 +8171,13 @@ local function farmerScan(px, py, maxN, filter)
     end)
     for _, y in ipairs(order) do
         local list = rows[y]
-        table.sort(list, function(a, b) return a.x < b.x end) -- dari kiri ke kanan
+        table.sort(list, function(a, b) return a.x < b.x end)
+        if FC.pabrikFast and FC.row then
+            if FC.row.y ~= y or not FC.row.dir then
+                FC.row.dir = abs(list[1].x - px) <= abs(list[#list].x - px) and 1 or -1
+            end
+            if FC.row.dir < 0 then table.sort(list, function(a, b) return a.x > b.x end) end
+        end
         if FC.sweepPlant then
             local target = Move.farmerPlantTarget(FC, list, px, py)
             if target then return { target }, nextReady end
@@ -8271,7 +8498,8 @@ local function fieldStep()
         if refill == "cancelled" then return "wait" end
     end
     local R = FC.batch and math.max(FC.harvest and punchReach() or 0, FC.plant and buildReach() or 0) - 0.35
-        or (FC.pabrikHarvest and punchReach() or farmReach()) - 0.35
+        or (FC.pabrikFast and (FC.harvest and punchReach() or buildReach())
+            or (FC.pabrikHarvest and punchReach() or farmReach())) - 0.35
     local useBlock = scaffoldId() ~= nil
     local sx, sy = startNode(s)
     local px, py = floor(s.x), floor(s.y - 0.475)
@@ -8290,6 +8518,14 @@ local function fieldStep()
     -- Mode tanam tetap mendekati baris pohon untuk mengambil hasil panennya.
     targets.los = targets[1].kind == "harvest" and not (FC.focusHarvest or FC.pabrikHarvest)
     if targets[1].kind == "plant" then targets.cancel = FC.yieldHarvest end
+    if FC.pabrikFast then
+        local cfg, pending = FC, targets.cancel
+        targets.smooth = true
+        targets.cancel = function()
+            return FC ~= cfg or Refs.World ~= w or not cfg.run() or not alive()
+                or (pending and pending())
+        end
+    end
     travelGroup(sx, sy, targets, R, useBlock, FC.skip, FarmerFail)
     return "move"
 end
@@ -8888,18 +9124,20 @@ local function pabrikCfg(o, harvest, plant)
     return {
         run = o.live,
         harvest = harvest,
+        pabrikFast = Pabrik.Fast,
         pabrikHarvest = harvest, -- jangkauan dan jalur panen Pabrik
         plant = plant and invCount(o.seed) > 0,
         seed = o.seed,
         skip = Pabrik.Skip,
-        hms = Farmer.HarvestMs,
-        pms = Farmer.PlantMs,
+        hms = Pabrik.Fast and 140 or Farmer.HarvestMs,
+        pms = Pabrik.Fast and 140 or Farmer.PlantMs,
         area = area,
         plantSet = plantSet,
         exclude = o.exclude,
         row = Pabrik.Row,
         collect = not harvest, -- panen dahulu; perjalanan ambil block punya fase sendiri
         status = function(t) Pabrik.Status = t end,
+        harvestRoom = function() return invCount(o.seed) < CAP - 20 and invCount(o.block) < CAP - 20 end,
         onHarvest = function() Pabrik.Harvested += 1 end,
         onPlant = function() Pabrik.Planted += 1 end,
         yieldHarvest = (not harvest and plant) and function() return Pabrik.wantHarvest(o) end or nil,
@@ -14645,6 +14883,15 @@ do (function()
     end)
 
     safe(function()
+        pCtl:Toggle({
+            Title = "Pabrik lebih cepat",
+            Desc = "Dahulukan target dekat, jalan lurus lebih lancar, dan kurangi jeda tambahan",
+            Value = Pabrik.Fast,
+            Callback = function(on) Pabrik.Fast = on; table.clear(Pabrik.Row) end,
+        })
+    end)
+
+    safe(function()
         UI.PabrikSeedDropdown = pCtl:Dropdown({
             Title = "Seed pabrik",
             Desc = "Block-nya otomatis (contoh: Dirt Seed -> Dirt)",
@@ -15303,7 +15550,8 @@ end)
 
 -- ===== KONEKSI: AUTO RECONNECT =====
 do (function()
-    local rBox = box(ConnTab, "Auto Rejoin", false)
+    local RejoinTab = makeTab("Auto Rejoin", "rotate-cw", "setel")
+    local rBox = box(RejoinTab, "Auto Rejoin", true)
 
     safe(function()
         UI.RejoinStatus = rBox:Paragraph({ Title = "Status", Desc = Rejoin.Status })

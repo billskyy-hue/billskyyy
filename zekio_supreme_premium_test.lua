@@ -1358,6 +1358,7 @@ local State = {
     Visual = true,                -- animasi tangan saat break / place / tanam / panen (tampilan saja)
     LiteMode = false,
     AutoCollect = true,           -- ambil drop di tile yang dipilih
+    SkipCollectGems = false,      -- lewati gems pada collector dan pencarian drop script
     CollectAround = false,        -- ambil drop di sekitar karakter (radius) kapan saja
     CollectRadius = 3,            -- jari-jari collect (tile), dipakai mode Remote
     CollectMode = "Sentuhan",     -- "Sentuhan" (badan, seperti main manual) / "Remote" (ambil dari jauh, cara lama)
@@ -2447,7 +2448,7 @@ end)() end
 Config.add("Farm", State, {
     "Mode", "PlaceMs", "BreakMs", "AfterBreakMs", "HitsOverride", "SelectedId", "Offsets",
     "CalibX", "CalibY", "AntiAfk", "MutePunch", "Visual", "LiteMode", "AutoCollect", "MultiTarget",
-    "CollectAround", "CollectRadius", "CollectMode", "SeedDrop", "SeedDropAt", "SeedKeep",
+    "CollectAround", "CollectRadius", "CollectMode", "SkipCollectGems", "SeedDrop", "SeedDropAt", "SeedKeep",
 })
 Config.add("Clear", Clear, { "UseBlock", "ScaffoldId", "Collect", "Sweep" })
 Config.add("Farmer", Farmer, {
@@ -3912,6 +3913,7 @@ end
 
 local function takeDrop(d)
     if not Drops.record(d) then return false end
+    if State.SkipCollectGems and d.id == 112 then return false end
     local pool = Drops.pool()
     local world, inventory, grid = Refs.World, Refs.Inv, Refs.World and Refs.World.fg
     if pool.busy >= 4 then return false end
@@ -4002,6 +4004,7 @@ local nextDropScan = 0
 
 local function canTry(d, now)
     if not Drops.record(d) or d.taking or d.pending or d.display or d.n <= 0 then return false end
+    if State.SkipCollectGems and d.id == 112 then return false end
     if d.armed == false and d.id ~= 112 then return false end
     local fail = DropFailUntil[d.uid]
     return not (fail and now < fail)
@@ -4118,7 +4121,8 @@ local function waitTileDrops(t, maxSec)
         if not alive() or Refs.World ~= world then return false end
         local busy = false
         for _, d in ipairs(Drops.snapshot()) do
-            if d.n > 0 and not d.display and inTile(t, d.x, d.y) then busy = true; break end
+            if d.n > 0 and not d.display and not (State.SkipCollectGems and d.id == 112)
+                and inTile(t, d.x, d.y) then busy = true; break end
         end
         if not busy then return true end
         task.wait()
@@ -4141,6 +4145,7 @@ local function waitNearDrops(maxSec)
         for _, d in ipairs(Drops.snapshot(list)) do
             -- sama dengan aturan game: < 0.6 tile mendatar & setinggi badan (kaki s.y, kepala s.y - 0.95)
             if type(d) == "table" and type(d.x) == "number" and (d.n or 0) > 0 and d.armed ~= false
+                and not (State.SkipCollectGems and d.id == 112)
                 and math.abs(d.x - s.x) < 0.6 and d.y + 0.3 > s.y - 0.95 and d.y - 0.3 < s.y then
                 local room = true
                 if d.id ~= 112 and Refs.Inv then -- inventori penuh: tidak akan terpungut
@@ -5865,10 +5870,12 @@ end
 
 -- Items denied by the collector (full inventory, unarmed, cooldown, pending)
 -- still occupy the tile and still suppress seed/block rewards when broken.
+-- Gems explicitly skipped by the user do not hold the farming loop here.
 function Drops.tileReady(t)
     if not Drops.list then return false, "Daftar drop belum terbaca; jeda break" end
     for _, d in ipairs(Drops.snapshot()) do
-        if d.n > 0 and not d.display and inTile(t, d.x, d.y) then return false, d end
+        if d.n > 0 and not d.display and not (State.SkipCollectGems and d.id == 112)
+            and inTile(t, d.x, d.y) then return false, d end
     end
     return true
 end
@@ -11799,6 +11806,15 @@ safe(function()
         Desc = "Ambil drop di semua tile grid (caranya ikut Mode collect)",
         Value = State.AutoCollect,
         Callback = function(on) State.AutoCollect = on end,
+    })
+end)
+
+safe(function()
+    Box.FarmCtl:Toggle({
+        Title = "Jangan Auto Collect Gems",
+        Desc = "Lewati gems saat collect dan mencari drop. Block/seed tetap diambil sesuai pengaturan. Gems yang tersentuh badan masih bisa terambil oleh game.",
+        Value = State.SkipCollectGems,
+        Callback = function(on) State.SkipCollectGems = on == true end,
     })
 end)
 

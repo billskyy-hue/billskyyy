@@ -272,7 +272,7 @@ local PAGES = {
     updates={title="Update",subtitle="Zekio Supreme Premium • Build P15.",nodes={}},
 }
 local GROUPS={
-    {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
+    {id="farming",title="Farming",mark="F",pages={"farmer","pabrik","splice","dirt","clear"}},
     {id="world",title="World",mark="W",pages={"drop","growscan"}},
     {id="items",title="Item",mark="I",pages={"inventory","vending"}},
     {id="proxy",title="Proxy",mark="P",pages={"proxy"}},
@@ -4650,7 +4650,7 @@ local function farmLoop(runId)
         for _, o in ipairs(sortedOffsets()) do tiles[#tiles + 1] = { x = px + o.dx, y = py + o.dy } end
 
         if doBreak then
-            local safe, reason = Drops.prepareWork(tiles, px, py, live)
+            local safe, reason = Drops.prepareWork(tiles, px, py, live, { skipFullDrops = true })
             State.WorkReason, State.WaitingDrops = reason, #safe == 0
             tiles = safe
             if not live() then continue end
@@ -4674,7 +4674,7 @@ local function farmLoop(runId)
                 end
                 -- Finish a background layer after collecting the foreground
                 -- rewards, before placing the next foreground block on it.
-                if not pendingBg[key] and (not doBreak or Drops.tileReady(t)) then
+                if not pendingBg[key] and (not doBreak or Drops.tileReady(t, true)) then
                     local r, why = tryPlace(t.x, t.y)
                     if not live() then break end
                     if why == "place-error" then stopFarm(State.LastAction); return end
@@ -4690,14 +4690,14 @@ local function farmLoop(runId)
                 while #active < K and nextI <= #tiles do
                     local t = tiles[nextI]
                     nextI = nextI + 1
-                    if Drops.tileReady(t) then active[#active + 1] = { x = t.x, y = t.y, n = 0 } end
+                    if Drops.tileReady(t, true) then active[#active + 1] = { x = t.x, y = t.y, n = 0 } end
                 end
                 if #active == 0 then break end
                 local hits, rayDir
                 if K > 1 and raymanOn() then hits, rayDir = raymanLine(px, py, active) end
                 if not rayDir then hits = { active[1] } end
                 local ready = true
-                for _, a in ipairs(hits) do if not Drops.tileReady(a) then ready = false; a.done = true end end
+                for _, a in ipairs(hits) do if not Drops.tileReady(a, true) then ready = false; a.done = true end end
                 if not ready then rayDir = nil end
                 local t0, hit, broke = os.clock(), false, false
                 if rayDir then raymanAct(rayDir) end
@@ -4705,7 +4705,7 @@ local function farmLoop(runId)
                     if not live() then break end
                     if i > 1 then task.wait(0.05) end
                     if not live() then break end
-                    local clear, blocker = Drops.tileReady(a)
+                    local clear, blocker = Drops.tileReady(a, true)
                     if not clear then
                         a.done = true
                         State.WorkReason, State.LastAction = Drops.blockReason(blocker), Drops.blockReason(blocker)
@@ -5868,14 +5868,16 @@ function Drops.touchAll(tiles, hx, hy, live)
     return ok, true -- nilai kedua menandakan collect benar-benar mencoba bergerak
 end
 
--- Items denied by the collector (full inventory, unarmed, cooldown, pending)
--- still occupy the tile and still suppress seed/block rewards when broken.
--- Gems explicitly skipped by the user do not hold the farming loop here.
-function Drops.tileReady(t)
+-- Most uncollected drops remain blockers until collected. In normal Auto Farm,
+-- drops that cannot fit in inventory are non-blocking, so break keeps running.
+-- The Factory and other modes retain the original blocking behavior.
+function Drops.tileReady(t, skipFullDrops)
     if not Drops.list then return false, "Daftar drop belum terbaca; jeda break" end
     for _, d in ipairs(Drops.snapshot()) do
         if d.n > 0 and not d.display and not (State.SkipCollectGems and d.id == 112)
-            and inTile(t, d.x, d.y) then return false, d end
+            and inTile(t, d.x, d.y) and (not skipFullDrops or Drops.room(d.id) ~= 0) then
+            return false, d
+        end
     end
     return true
 end
@@ -5928,6 +5930,7 @@ function Drops.prepareWork(tiles, hx, hy, live, options)
         if not Drops.list then findDropRefs() end
         if not Drops.list then return {}, "Daftar drop belum terbaca; tekan Hubungkan ke game" end
         local collect = options.collect or State.AutoCollect or State.Override ~= nil
+        local skipFullDrops = options.skipFullDrops == true
         local nearby = Drops.workTiles(tiles)
         Drops.waitSpawn(nearby)
         if not live() then return {}, "Collect dibatalkan" end
@@ -5940,7 +5943,7 @@ function Drops.prepareWork(tiles, hx, hy, live, options)
                     if not s or s.dead or not live() then break end
                     for _, d in ipairs(Drops.snapshot()) do
                         if queued >= 4 or Drops.pool().busy >= 4 then break end
-                        if canTry(d, os.clock()) then
+                        if canTry(d, os.clock()) and (not skipFullDrops or Drops.room(d.id) ~= 0) then
                             local hit = false
                             for _, t in ipairs(nearby) do if inTile(t, d.x, d.y) then hit = true; break end end
                             local R = (State.CollectRadius or 3) + 0.2
@@ -5951,7 +5954,7 @@ function Drops.prepareWork(tiles, hx, hy, live, options)
                         end
                     end
                     local clear = true
-                    for _, t in ipairs(tiles) do if not Drops.tileReady(t) then clear = false; break end end
+                    for _, t in ipairs(tiles) do if not Drops.tileReady(t, skipFullDrops) then clear = false; break end end
                     if clear and Drops.pool().busy == 0 then break end
                     task.wait(0.05)
                 until not live() or os.clock() >= untilAt
@@ -5966,7 +5969,7 @@ function Drops.prepareWork(tiles, hx, hy, live, options)
                 -- Native A* handles a remaining open drop below/above the sweep.
                 -- Make only one bounded visit, then return to the same farm anchor.
                 for _, t in ipairs(tiles) do
-                    local clear, d = Drops.tileReady(t)
+                    local clear, d = Drops.tileReady(t, skipFullDrops)
                     if not clear and type(d) == "table" and canTry(d, os.clock())
                         and Drops.room(d.id) ~= 0 and not solidAt(floor(d.x), floor(d.y)) then
                         local visited, why = Drops.visitForWork(d, hx, hy, live)
@@ -5978,12 +5981,12 @@ function Drops.prepareWork(tiles, hx, hy, live, options)
         end
         if not live() or Refs.World ~= world then return {}, "Collect dibatalkan" end
         local seed = options.seed or (farmBlock() and Auto.seedOfBlock(farmBlock()))
-        if seed and Drops.room(seed) == 0 then
+        if seed and not skipFullDrops and Drops.room(seed) == 0 then
             return {}, "Tas seed penuh; menunggu auto drop / ruang inventori"
         end
         local out, why = {}, nil
         for _, t in ipairs(tiles) do
-            local clear, blocker = Drops.tileReady(t)
+            local clear, blocker = Drops.tileReady(t, skipFullDrops)
             if clear then out[#out + 1] = t else why = why or Drops.blockReason(blocker) end
         end
         return out, why
@@ -11809,14 +11812,7 @@ safe(function()
     })
 end)
 
-safe(function()
-    Box.FarmCtl:Toggle({
-        Title = "Jangan Auto Collect Gems",
-        Desc = "Lewati gems saat collect dan mencari drop. Block/seed tetap diambil sesuai pengaturan. Gems yang tersentuh badan masih bisa terambil oleh game.",
-        Value = State.SkipCollectGems,
-        Callback = function(on) State.SkipCollectGems = on == true end,
-    })
-end)
+
 
 safe(function()
     Box.FarmCtl:Dropdown({
@@ -11947,6 +11943,15 @@ Box.FarmerCtl = box(FarmerTab, "Kontrol", true)
 Box.FarmerSeed = box(FarmerTab, "Seed", true)
 Box.FarmerSpeed = box(FarmerTab, "Kecepatan", false)
 Box.FarmerBlock = box(FarmerTab, "Block pijakan", false)
+
+safe(function()
+    Box.FarmerCtl:Toggle({
+        Title = "Jangan Auto Collect Gems",
+        Desc = "Lewati gems saat collect dan mencari drop. Block/seed tetap diambil sesuai pengaturan. Gems yang tersentuh badan masih bisa terambil oleh game.",
+        Value = State.SkipCollectGems,
+        Callback = function(on) State.SkipCollectGems = on == true end,
+    })
+end)
 
 safe(function()
     UI.FarmerToggle = Box.FarmerCtl:Toggle({

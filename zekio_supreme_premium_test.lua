@@ -272,7 +272,7 @@ local PAGES = {
     updates={title="Update",subtitle="Zekio Supreme Premium • Build P15.",nodes={}},
 }
 local GROUPS={
-    {id="farming",title="Farming",mark="F",pages={"farmer","pabrik","splice","dirt","clear"}},
+    {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
     {id="world",title="World",mark="W",pages={"drop","growscan"}},
     {id="items",title="Item",mark="I",pages={"inventory","vending"}},
     {id="proxy",title="Proxy",mark="P",pages={"proxy"}},
@@ -769,7 +769,7 @@ local bootModel=overview:Paragraph({Title="Status sesi",Desc="Menyiapkan data Gr
 local activityModel=overview:Paragraph({Title="Aktivitas",Desc="Menunggu koneksi ke world…"})
 function Session.UpdateSummary(text) activityModel:SetDesc(text) end
 local quick=overview:Section({Title="Akses cepat",Opened=true})
-for _,id in ipairs({"farmer","pabrik","dirt","clear"}) do
+for _,id in ipairs({"farm","farmer","pabrik","dirt","clear"}) do
     local target=id
     quick:Button({Title=PAGES[id].title,Callback=function() UI.show(target,"farming") end})
 end

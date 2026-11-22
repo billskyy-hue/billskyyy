@@ -191,6 +191,7 @@ local MENU_ICONS={
     world={circles={{12,12,10}},paths={{2,12,22,12},{4,7,20,7},{4,17,20,17},{12,2,8.5,5,7,12,8.5,19,12,22},{12,2,15.5,5,17,12,15.5,19,12,22}}},
     tools={paths={{13,2,15.5,8.5,22,11,15.5,13.5,13,20,10.5,13.5,4,11,10.5,8.5,13,2},{4,2,4,6},{2,4,6,4}}},
 }
+MENU_ICONS.roulette={circles={{12,12,10},{12,12,2}},paths={{12,2,12,10},{12,14,12,22},{2,12,10,12},{14,12,22,12},{5,5,10,10},{14,14,19,19},{19,5,14,10},{10,14,5,19}}}
 MENU_ICONS.connection={paths={{7,2,7,7},{17,2,17,7},{5,7,19,7,19,12,16,16,8,16,5,12,5,7},{12,16,12,22}}}
 MENU_ICONS.rejoin={paths={{20,7,17,4,12,3,7,4,3,8,3,14,7,19,12,21,18,19,21,15},{20,2,20,7,15,7}}}
 MENU_ICONS.discord={paths={{4,17,6,14,6,9,8,5,12,3,16,5,18,9,18,14,20,17,4,17},{9,21,15,21}}}
@@ -260,6 +261,7 @@ local PAGES = {
     inventory={title="Tas",subtitle="Inventori, trash item dan pembelian lock.",nodes={}},
     vending={title="Vending",subtitle="Isi stock dan kosongkan vending milikmu.",nodes={}},
     proxy={title="Proxy",subtitle="Fast Pull melalui wrench.",nodes={}},
+    roulette={title="Roulette",subtitle="Pembaca hasil spin, REME/QQ, dan riwayat.",nodes={}},
     chat={title="Auto Chat",subtitle="Susun dan kirim pesan dengan interval pilihan.",nodes={}},
     bonus={title="Bonus",subtitle="Quest, redeem dan kode bonus.",nodes={}},
     security={title="Keamanan",subtitle="Penjaga dan pengaturan respons sesi.",nodes={}},
@@ -275,7 +277,7 @@ local GROUPS={
     {id="farming",title="Farming",mark="F",pages={"farm","farmer","pabrik","splice","dirt","clear"}},
     {id="world",title="World",mark="W",pages={"drop","growscan"}},
     {id="items",title="Item",mark="I",pages={"inventory","vending"}},
-    {id="proxy",title="Proxy",mark="P",pages={"proxy"}},
+    {id="proxy",title="Proxy",mark="P",pages={"proxy","roulette"}},
     {id="tools",title="Utilitas",mark="U",pages={"chat","bonus","security"}},
     {id="rejoin",title="Auto Rejoin",direct="rejoin",pages={"rejoin"}},
     {id="system",title="Sistem",mark="S",pages={"settings","connection","discord","stats","key","updates"}},
@@ -843,6 +845,301 @@ do
         end})
 end
 
+-- ===== PROXY > ROULETTE (Growblox adapter) =====
+-- Passive and reversible: observes public chat + explicitly named result remotes.
+-- It never predicts RNG, edits server packets, or modifies the normal Farm engine.
+do
+    local chatService = game:GetService("TextChatService")
+    local storage = game:GetService("ReplicatedStorage")
+    local rouletteTab = builtin("roulette")
+    local state = {
+        enabled = false, mode = "REME", tags = true, keepHistory = true,
+        history = {}, last = {}, connections = {}, observed = {}, count = 0,
+        remoteCount = 0, lastKey = "", lastAt = 0, status = "Tidak aktif",
+        checkedSources = 0,
+    }
+    Session.RouletteHandler = state
+    local statusView = rouletteTab:Paragraph({Title="Roulette Handler", Desc="Mati. Aktifkan untuk memantau hasil roulette di Growblox."})
+    local lastView = rouletteTab:Paragraph({Title="Spin terakhir", Desc="Belum ada hasil yang terdeteksi."})
+    local historyView = rouletteTab:Paragraph({Title="Riwayat roulette (maks. 20)", Desc="Belum ada riwayat."})
+
+    local function reme(n)
+        return (math.floor(n / 10) + n % 10) % 10
+    end
+    local function modeValue(n)
+        if state.mode == "QQ" then return n % 10 end
+        if state.mode == "REME" then return reme(n) end
+        return n
+    end
+    local function trim(s)
+        return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    end
+    local function parseSpin(text)
+        if type(text) ~= "string" or #text > 1200 then return nil end
+        local clean = text:gsub("<.->", ""):gsub("`[%w]", ""):gsub("[%c]", " ")
+        local lower = clean:lower()
+        local phrases = {
+            " spun the wheel and got ",
+            " spun roulette and got ",
+            " rolled the roulette and got ",
+            " memutar roulette dan mendapat ",
+        }
+        local pos, phrase
+        for _, p in ipairs(phrases) do
+            local at = lower:find(p, 1, true)
+            if at then pos, phrase = at, p; break end
+        end
+        if not pos then return nil end
+        local n = tonumber(clean:sub(pos + #phrase):match("^%s*(%d+)"))
+        if not n or n < 0 or n > 36 or n % 1 ~= 0 then return nil end
+        local who = trim(clean:sub(1, pos - 1))
+        who = trim(who:gsub("^%[", ""):gsub("%]$", ""))
+        if who == "" then who = "Pemain" end
+        if #who > 48 then who = who:sub(-48) end
+        return who, n
+    end
+
+    local function formatRecord(e)
+        local tag = ""
+        if state.tags then tag = " [" .. e.origin .. "]" end
+        return string.format("%s %s: %d (%s %d)%s", e.clock, e.who, e.number, state.mode, modeValue(e.number), tag)
+    end
+    local function refreshViews()
+        if not alive() then return end
+        local source = state.checkedSources > 0 and (tostring(state.checkedSources) .. " sumber dipantau") or "belum ada sumber"
+        local s = (state.enabled and "AKTIF" or "MATI")
+            .. " | " .. source .. " | " .. tostring(state.count) .. " spin"
+            .. "\nMode " .. state.mode .. " | Event hasil server: " .. tostring(state.remoteCount)
+            .. "\n" .. state.status
+        statusView:SetDesc(s)
+        local latest = state.history[1]
+        lastView:SetDesc(latest and formatRecord(latest) or "Belum ada hasil yang terdeteksi.")
+        if not state.keepHistory or #state.history == 0 then
+            historyView:SetDesc(state.keepHistory and "Belum ada riwayat." or "Penyimpanan riwayat dimatikan.")
+            return
+        end
+        local lines = {}
+        for i = 1, math.min(20, #state.history) do
+            lines[i] = string.format("%02d. %s", i, formatRecord(state.history[i]))
+        end
+        historyView:SetDesc(table.concat(lines, "\n"))
+    end
+
+    local function accept(who, number, origin, source)
+        if not state.enabled or not alive() then return end
+        if type(number) ~= "number" or number % 1 ~= 0 or number < 0 or number > 36 then return end
+        who = trim(who)
+        if who == "" then who = "Pemain" end
+        local now = os.clock()
+        local key = string.lower(who) .. ":" .. tostring(number)
+        local latest = state.history[1]
+        local duplicate = (key == state.lastKey)
+            or (latest and now - state.lastAt < 1.5 and latest.number == number
+                and (who == "Pemain" or latest.who == "Pemain"))
+        if duplicate and now - state.lastAt < 1.5 then
+            local priority = {SERVER=4, SISTEM=3, FAKE=2, ["TIDAK PASTI"]=1}
+            if latest then
+                if latest.who == "Pemain" and who ~= "Pemain" then
+                    latest.who = who
+                    state.lastKey = key
+                end
+                if (priority[origin] or 0) > (priority[latest.origin] or 0) then
+                    latest.origin = origin
+                    latest.source = source
+                end
+                refreshViews()
+            end
+            return
+        end
+        state.lastKey, state.lastAt = key, now
+        state.count += 1
+        local event = {
+            who = who, number = number, origin = origin,
+            source = source or "", clock = os.date("%H:%M:%S"),
+        }
+        if not state.keepHistory then table.clear(state.history) end
+        table.insert(state.history, 1, event)
+        if #state.history > 20 then table.remove(state.history) end
+        state.last[who] = event
+        state.status = "Terakhir dibaca dari " .. (source or "sumber tidak diketahui")
+            .. (origin == "SERVER" and " (event hasil)" or " (tampilan/chat; bukan prediksi)")
+        refreshViews()
+    end
+    local function onText(text, origin, source)
+        local who, n = parseSpin(text)
+        if who then accept(who, n, origin, source) end
+    end
+    local function listen(signal, fn)
+        local ok, connection = pcall(function() return signal:Connect(fn) end)
+        if ok and connection then
+            state.connections[#state.connections + 1] = connection
+            state.checkedSources += 1
+        end
+    end
+    local function safeReadField(t, ...)
+        if type(t) ~= "table" then return nil end
+        for i = 1, select("#", ...) do
+            local field = select(i, ...)
+            local value = rawget(t, field)
+            if value ~= nil then return value end
+        end
+        return nil
+    end
+    local function watchRemote(remote)
+        if state.observed[remote] or not remote:IsA("RemoteEvent") then return end
+        local name = string.lower(remote.Name):gsub("[^%w]", "")
+        local isResult = name:find("rouletteresult", 1, true)
+            or name:find("spinresult", 1, true)
+            or name:find("wheelresult", 1, true)
+            or name:find("spinwheelresult", 1, true)
+            or name:find("wheelspinresult", 1, true)
+            or name:find("rouletteoutcome", 1, true)
+        if not isResult then return end
+        state.observed[remote] = true
+        listen(remote.OnClientEvent, function(...)
+            if not state.enabled then return end
+            local args = table.pack(...)
+            local who, n
+            for i = 1, args.n do
+                local arg = args[i]
+                if type(arg) == "table" then
+                    n = n or tonumber(safeReadField(arg,"number","result","spinResult","spin","value"))
+                    who = who or safeReadField(arg,"playerName","spinner","name","player")
+                elseif type(arg) == "number" and not n and arg % 1 == 0 and arg >= 0 and arg <= 36 then
+                    n = arg
+                elseif type(arg) == "string" then
+                    local named, num = parseSpin(arg)
+                    if named then who, n = named, num
+                    elseif not n and arg:match("^%d%d?$") then n = tonumber(arg)
+                    elseif not who and #arg <= 45 and not arg:match("^%d+$") then who = arg end
+                end
+            end
+            if n then
+                state.remoteCount += 1
+                accept(who or "Pemain", n, "SERVER", "RemoteEvent/" .. remote.Name)
+            end
+        end)
+    end
+    local function watchChannel(channel)
+        if not channel:IsA("TextChannel") or state.observed[channel] then return end
+        state.observed[channel] = true
+        listen(channel.MessageReceived, function(message)
+            if not state.enabled then return end
+            local origin = message.TextSource and "FAKE" or "SISTEM"
+            onText(message.Text, origin, "TextChannel/" .. channel.Name)
+        end)
+    end
+    local function watchGuiText(item)
+        if not item:IsA("TextLabel") or state.observed[item] then return end
+        local ancestor = item:FindFirstAncestor("ChatGui")
+        if not ancestor then return end
+        state.observed[item] = true
+        local function changed()
+            if state.enabled then onText(item.Text, "TIDAK PASTI", "ChatGui") end
+        end
+        listen(item:GetPropertyChangedSignal("Text"), changed)
+        changed()
+    end
+    local function stop()
+        state.enabled = false
+        for _, connection in ipairs(state.connections) do
+            pcall(function() connection:Disconnect() end)
+        end
+        table.clear(state.connections)
+        table.clear(state.observed)
+        state.checkedSources = 0
+        state.status = "Pemantauan berhenti."
+        refreshViews()
+    end
+    Session.RouletteStop = stop
+    local function start()
+        stop()
+        if not alive() then return end
+        state.enabled = true
+        state.status = "Menunggu pesan spin (0-36) atau event RouletteResult."
+        listen(chatService.MessageReceived, function(message)
+            if not state.enabled then return end
+            onText(message.Text, message.TextSource and "FAKE" or "SISTEM", "TextChatService")
+        end)
+        local function scanChannels(node)
+            if node:IsA("TextChannel") then watchChannel(node) end
+            for _, child in ipairs(node:GetDescendants()) do
+                if child:IsA("TextChannel") then watchChannel(child) end
+            end
+        end
+        pcall(scanChannels, chatService)
+        listen(chatService.DescendantAdded, function(node)
+            if node:IsA("TextChannel") then watchChannel(node) end
+        end)
+        for _, remote in ipairs(storage:GetDescendants()) do watchRemote(remote) end
+        listen(storage.DescendantAdded, function(remote) watchRemote(remote) end)
+        local chatGui = playerGui:FindFirstChild("ChatGui")
+        if chatGui then
+            for _, item in ipairs(chatGui:GetDescendants()) do watchGuiText(item) end
+        end
+        listen(playerGui.DescendantAdded, function(item)
+            if item:IsA("TextLabel") then watchGuiText(item) end
+        end)
+        refreshViews()
+    end
+    Session.RouletteStart = start
+    Session.RouletteParse = parseSpin
+
+    rouletteTab:Paragraph({Title="Cara kerja", Desc="Membaca pesan hasil spin Growblox dan event RouletteResult bila tersedia. REAL hanya ditandai bila event hasil server diketahui; pesan sistem/chat ditandai sesuai sumber. Tidak menebak RNG, tidak mengubah chat game."})
+    local enableToggle = rouletteTab:Toggle({
+        Title="Aktifkan Roulette Handler", Value=false,
+        Desc="Pantau pesan dan event roulette. Tombol ini tidak memukul roda secara otomatis.",
+        Callback=function(on)
+            V["proxy.rouletteEnabled"] = on
+            if on then start() else stop() end
+        end,
+    })
+    local modeDropdown = rouletteTab:Dropdown({
+        Title="Mode angka", Values={"REAL","REME","QQ"}, Value="REME",
+        Desc="REAL = angka asli | REME = jumlah digit % 10 | QQ = digit terakhir.",
+        Callback=function(mode)
+            state.mode = (mode == "REAL" or mode == "QQ") and mode or "REME"
+            V["proxy.rouletteMode"] = state.mode
+            refreshViews()
+        end,
+    })
+    local tagToggle = rouletteTab:Toggle({
+        Title="Tampilkan asal hasil (REAL/FAKE)", Value=true,
+        Desc="SERVER = event hasil | SISTEM = pesan sistem | FAKE = teks pemain | TIDAK PASTI = tampilan GUI.",
+        Callback=function(on)
+            state.tags = on
+            V["proxy.rouletteTags"] = on
+            refreshViews()
+        end,
+    })
+    local historyToggle = rouletteTab:Toggle({
+        Title="Simpan riwayat 20 spin", Value=true,
+        Desc="Menampilkan angka dan nilai REME/QQ; tersimpan hanya selama sesi ini.",
+        Callback=function(on)
+            state.keepHistory = on
+            V["proxy.rouletteHistory"] = on
+            if not on then table.clear(state.history) end
+            refreshViews()
+        end,
+    })
+    rouletteTab:Button({Title="Hapus riwayat roulette", Desc="Bersihkan hasil sesi tanpa mematikan pemantauan.", Callback=function()
+        table.clear(state.history)
+        table.clear(state.last)
+        state.lastKey = ""
+        refreshViews()
+    end})
+    function Session.RouletteRestoreSettings()
+        -- Called after the existing config file was loaded by the gameplay engine.
+        local mode = V["proxy.rouletteMode"]
+        if mode ~= "REAL" and mode ~= "REME" and mode ~= "QQ" then mode = "REME" end
+        modeDropdown:Select(mode)
+        tagToggle:Set(V["proxy.rouletteTags"] ~= false)
+        historyToggle:Set(V["proxy.rouletteHistory"] ~= false)
+        enableToggle:Set(V["proxy.rouletteEnabled"] == true)
+    end
+    refreshViews()
+end
+
 local account=builtin("key")
 account:Paragraph({Title="Akun",Desc=tostring(player.DisplayName or player.Name or "Pemain").."\nUsername: "..tostring(player.Name or "—").."\nUser ID: "..tostring(player.UserId or "—")})
 account:Paragraph({Title="Versi tes",Desc="Salinan Premium tanpa key untuk pengujian."})
@@ -1002,6 +1299,7 @@ function Session.Cleanup()
     Session.CommitInputs()
     Session.Closed=true;Session.ActiveSlider=nil;Session.Drag=nil
     UI.closePopup()
+    if Session.RouletteStop then pcall(Session.RouletteStop) end
     if Session.EngineCleanup then pcall(Session.EngineCleanup) end
     for _,model in ipairs(Session.EngineControls) do model.Bind=nil;model.PaintValue=nil end
     for _,c in ipairs(Session.PageConnections) do pcall(function() c:Disconnect() end) end
@@ -2475,8 +2773,12 @@ Config.add("Pabrik", Pabrik, {
     "Fast", "SeedId", "WholeWorld", "Tiles", "BreakX", "BreakY",
     "Drop", "Keep", "DropAt", "DropWorld", "DropX", "DropY",
 })
-Config.add("PremiumUI", Premium.Values, { "ui.theme", "ui.scale", "ui.notifications", "ui.transparency", "ui.layoutRevision" })
+Config.add("PremiumUI", Premium.Values, {
+    "ui.theme", "ui.scale", "ui.notifications", "ui.transparency", "ui.layoutRevision",
+    "proxy.rouletteEnabled", "proxy.rouletteMode", "proxy.rouletteTags", "proxy.rouletteHistory",
+})
 Premium.ApplyAppearance()
+if Premium.RouletteRestoreSettings then pcall(Premium.RouletteRestoreSettings) end
 Config.add("Bahasa", I18N, { "Saved", "Ask" })
 I18N.Lang = (I18N.Saved == "en") and "en" or "id"
 

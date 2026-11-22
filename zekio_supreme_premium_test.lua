@@ -1390,6 +1390,9 @@ local Misc = {
 -- Auto Clear World
 local Clear = {
     Running = false,
+    BreakAll = false,           -- mode terpisah: pecah seluruh world
+    BreakAllSaved = nil,       -- simpan pengaturan Clear sebelum Break All
+    BreakAllLastResult = nil,
     IncludeBg = true,         -- ikut pecah background
     UseBlock = true,          -- taruh block kalau tidak ada pijakan
     ScaffoldId = nil,         -- block yang dipakai untuk pijakan
@@ -6504,6 +6507,11 @@ local function updateClearStatus()
     lastClearText = txt
     task.defer(function()
         pcall(function() UI.ClearStatus:SetDesc(txt) end)
+        if UI.BreakAllStatus then
+            local info = Clear.BreakAll and txt or
+                ("Status : BERHENTI\nHasil  : " .. tostring(Clear.BreakAllLastResult or "Belum dijalankan"))
+            pcall(function() UI.BreakAllStatus:SetDesc(info) end)
+        end
     end)
 end
 
@@ -6596,16 +6604,31 @@ end
 
 local function setClearVisual()
     if UI.ClearToggle then pcall(function() UI.ClearToggle:Set(Clear.Running) end) end
+    if UI.BreakAllToggle and not UI.BreakAllSyncing then
+        UI.BreakAllSyncing = true
+        pcall(function() UI.BreakAllToggle:Set(Clear.Running and Clear.BreakAll == true) end)
+        UI.BreakAllSyncing = false
+    end
 end
 
 stopClear = function(reason)
+    local wasBreakAll = Clear.BreakAll == true
     Clear.Running = false
+    if wasBreakAll then
+        Clear.BreakAllLastResult = reason or "Dihentikan"
+        local saved = Clear.BreakAllSaved
+        if saved then
+            Clear.IncludeBg, Clear.UseBlock = saved.IncludeBg, saved.UseBlock
+            Clear.Collect, Clear.Sweep = saved.Collect, saved.Sweep
+        end
+        Clear.BreakAll, Clear.BreakAllSaved = false, nil
+    end
     autoEnd()
     setClearVisual()
     Clear.Status = reason or "Dihentikan"
     if reason then
-        notify("Auto Clear", reason, 5)
-        if not string.find(reason, "^Dihentikan") then Hook.send("stop", "Auto Clear berhenti: " .. reason) end
+        notify(wasBreakAll and "Break All" or "Auto Clear", reason, 5)
+        if not string.find(reason, "^Dihentikan") then Hook.send("stop", (wasBreakAll and "Break All" or "Auto Clear") .. " berhenti: " .. reason) end
     end
     updateClearStatus()
 end
@@ -6655,6 +6678,42 @@ local function startClear()
             if Clear.Running then stopClear("Error: " .. tostring(e)) end
         end
     end)
+end
+
+-- Break All memakai engine Clear World yang sudah ada, bukan mesin pukul baru.
+-- Mode ini berjalan otomatis sampai semua tile yang bisa dijangkau dibersihkan,
+-- tanpa auto collect atau pemasangan block. Setting Clear biasa dikembalikan saat STOP.
+function Auto.startBreakAll()
+    if Clear.Running then
+        if not Clear.BreakAll then
+            notify("Break All", "Clear World sedang aktif. STOP Clear World dahulu.", 4)
+        end
+        setClearVisual()
+        return
+    end
+    Clear.BreakAllSaved = {
+        IncludeBg = Clear.IncludeBg, UseBlock = Clear.UseBlock,
+        Collect = Clear.Collect, Sweep = Clear.Sweep,
+    }
+    Clear.BreakAllLastResult = nil
+    Clear.BreakAll = true
+    Clear.IncludeBg, Clear.UseBlock = true, false
+    Clear.Collect, Clear.Sweep = false, "Zig-zag"
+    startClear()
+    if not Clear.Running then
+        -- Bila pengecekan awal gagal, jangan tinggalkan setting Clear berubah.
+        local saved = Clear.BreakAllSaved
+        if saved then
+            Clear.IncludeBg, Clear.UseBlock = saved.IncludeBg, saved.UseBlock
+            Clear.Collect, Clear.Sweep = saved.Collect, saved.Sweep
+        end
+        Clear.BreakAll, Clear.BreakAllSaved = false, nil
+        setClearVisual()
+    end
+end
+
+function Auto.stopBreakAll()
+    if Clear.Running and Clear.BreakAll then stopClear("Dihentikan pengguna") end
 end
 
 ---------------------------------------------------------------------
@@ -11799,6 +11858,23 @@ safe(function()
         Value = false,
         Callback = function(on)
             if on then startFarm() elseif State.Running then stopFarm() end
+        end,
+    })
+end)
+
+-- Kontrol terpisah, tanpa mengubah Auto Farm dan Clear World asli.
+Box.BreakAll = box(FarmTab, "Break All", true)
+safe(function()
+    UI.BreakAllStatus = Box.BreakAll:Paragraph({
+        Title = "Status Break All", Desc = "Belum dijalankan",
+    })
+    UI.BreakAllToggle = Box.BreakAll:Toggle({
+        Title = "Break All (Seluruh World)",
+        Desc = "Pecah FG dan BG yang bisa dijangkau. Tidak auto collect atau memasang block pijakan. STOP untuk berhenti.",
+        Value = false,
+        Callback = function(on)
+            if UI.BreakAllSyncing then return end
+            if on then Auto.startBreakAll() else Auto.stopBreakAll() end
         end,
     })
 end)

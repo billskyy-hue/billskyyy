@@ -1,13 +1,14 @@
--- BILL AUTO BREAKER | passive world scanner
--- Reads Workspace metadata only. It does not call remotes or modify blocks.
+-- BILL AUTO BREAKER | Workspace + ReplicatedStorage Explorer
+-- Passive inspection only: lists instance names/classes and selected metadata.
+-- Does NOT decompile/require modules, call remotes, or modify game objects.
 
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local player = Players.LocalPlayer
-if not player then return end
+if not Players.LocalPlayer then return end
 
 pcall(function()
     local old = CoreGui:FindFirstChild("BILL_AUTO_BREAKER")
@@ -16,46 +17,41 @@ end)
 
 local function make(className, props, parent)
     local obj = Instance.new(className)
-    for k, v in pairs(props or {}) do obj[k] = v end
+    for k,v in pairs(props or {}) do obj[k] = v end
     obj.Parent = parent
     return obj
 end
-
 local function corner(obj, radius)
-    make("UICorner", {CornerRadius = UDim.new(0, radius or 8)}, obj)
+    make("UICorner", {CornerRadius=UDim.new(0,radius or 8)}, obj)
+end
+local function style(btn, color)
+    btn.BackgroundColor3=color
+    btn.BorderSizePixel=0
+    btn.Font=Enum.Font.GothamBold
+    btn.TextColor3=Color3.fromRGB(245,245,250)
+    btn.TextSize=11
+    corner(btn,7)
 end
 
-local function styleButton(btn, color)
-    btn.BackgroundColor3 = color
-    btn.BorderSizePixel = 0
-    btn.Font = Enum.Font.GothamBold
-    btn.TextColor3 = Color3.fromRGB(245,245,250)
-    btn.TextSize = 11
-    corner(btn, 7)
-end
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "BILL_AUTO_BREAKER"
-gui.ResetOnSpawn = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-local parented = false
+local gui=Instance.new("ScreenGui")
+gui.Name="BILL_AUTO_BREAKER"
+gui.ResetOnSpawn=false
+gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+local attached=false
 pcall(function()
-    if typeof(gethui) == "function" then
-        gui.Parent = gethui()
-        parented = true
-    end
+    if typeof(gethui)=="function" then gui.Parent=gethui(); attached=true end
 end)
-if not parented then gui.Parent = CoreGui end
+if not attached then gui.Parent=CoreGui end
 
-local panel = make("Frame", {
-    Name="Panel", Size=UDim2.fromOffset(340,440),
-    Position=UDim2.new(0.5,-170,0.5,-220),
-    BackgroundColor3=Color3.fromRGB(18,18,23), BorderSizePixel=0
-}, gui)
+local panel=make("Frame",{
+    Name="Panel",Size=UDim2.fromOffset(360,470),
+    Position=UDim2.new(0.5,-180,0.5,-235),
+    BackgroundColor3=Color3.fromRGB(18,18,23),BorderSizePixel=0
+},gui)
 corner(panel,12)
 make("UIStroke",{Color=Color3.fromRGB(65,65,82),Thickness=1},panel)
 
-local top = make("Frame",{
+local top=make("Frame",{
     Name="TopBar",Size=UDim2.new(1,0,0,42),
     BackgroundColor3=Color3.fromRGB(29,29,38),BorderSizePixel=0
 },panel)
@@ -70,93 +66,106 @@ make("TextLabel",{
     Text="BILL AUTO BREAKER",TextColor3=Color3.fromRGB(240,240,248),
     TextSize=15,TextXAlignment=Enum.TextXAlignment.Left
 },top)
-
-local close = make("TextButton",{
+local close=make("TextButton",{
     Name="Close",Size=UDim2.fromOffset(30,28),
     Position=UDim2.new(1,-36,0,7),Text="×",TextSize=20
 },top)
-styleButton(close,Color3.fromRGB(75,38,45))
+style(close,Color3.fromRGB(75,38,45))
 
-local scan = make("TextButton",{
-    Name="ScanBlocks",Position=UDim2.fromOffset(14,52),
-    Size=UDim2.fromOffset(110,29),Text="SCAN BLOCK"
+local wsBtn=make("TextButton",{
+    Name="WorkspaceScan",Position=UDim2.fromOffset(14,52),
+    Size=UDim2.fromOffset(155,30),Text="SCAN WORKSPACE"
 },panel)
-styleButton(scan,Color3.fromRGB(48,82,130))
+style(wsBtn,Color3.fromRGB(48,82,130))
+local rsBtn=make("TextButton",{
+    Name="ReplicatedScan",Position=UDim2.fromOffset(178,52),
+    Size=UDim2.fromOffset(168,30),Text="SCAN REPLICATED"
+},panel)
+style(rsBtn,Color3.fromRGB(74,66,130))
 
-local info = make("TextLabel",{
+local info=make("TextLabel",{
     Name="ScanInfo",BackgroundTransparency=1,
-    Position=UDim2.fromOffset(134,52),Size=UDim2.new(1,-148,0,29),
-    Font=Enum.Font.Gotham,Text="Menunggu pemindaian",
-    TextColor3=Color3.fromRGB(175,175,190),TextSize=10,
+    Position=UDim2.fromOffset(14,86),Size=UDim2.new(1,-28,0,27),
+    Font=Enum.Font.Gotham,Text="Pilih lokasi untuk dipindai",
+    TextColor3=Color3.fromRGB(180,180,195),TextSize=10,
     TextXAlignment=Enum.TextXAlignment.Left
 },panel)
 
-local list = make("ScrollingFrame",{
-    Name="BlockList",Position=UDim2.fromOffset(14,88),
-    Size=UDim2.new(1,-28,0,230),
+local filter=make("TextBox",{
+    Name="Filter",Position=UDim2.fromOffset(14,116),
+    Size=UDim2.new(1,-28,0,29),
+    BackgroundColor3=Color3.fromRGB(32,32,42),BorderSizePixel=0,
+    ClearTextOnFocus=false,Font=Enum.Font.Gotham,
+    PlaceholderText="Filter nama / class (contoh: ModuleScript, ItemDB)",
+    Text="",TextColor3=Color3.fromRGB(245,245,250),
+    PlaceholderColor3=Color3.fromRGB(130,130,145),TextSize=10
+},panel)
+corner(filter,7)
+
+local list=make("ScrollingFrame",{
+    Name="ExplorerList",Position=UDim2.fromOffset(14,153),
+    Size=UDim2.new(1,-28,0,250),
     BackgroundColor3=Color3.fromRGB(29,29,38),BorderSizePixel=0,
-    CanvasSize=UDim2.new(0,0,0,0),ScrollBarThickness=4
+    CanvasSize=UDim2.new(0,0,0,0),ScrollBarThickness=5
 },panel)
 corner(list,8)
-local layout = make("UIListLayout",{
-    Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder
+local layout=make("UIListLayout",{
+    Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder
 },list)
 make("UIPadding",{
     PaddingTop=UDim.new(0,7),PaddingBottom=UDim.new(0,7),
     PaddingLeft=UDim.new(0,7),PaddingRight=UDim.new(0,7)
 },list)
 
-local selected = make("TextLabel",{
-    Name="SelectedBlock",Position=UDim2.fromOffset(14,326),
-    Size=UDim2.new(1,-28,0,38),
+local detail=make("TextLabel",{
+    Name="SelectedObject",Position=UDim2.fromOffset(14,410),
+    Size=UDim2.new(1,-28,0,25),
     BackgroundColor3=Color3.fromRGB(32,32,42),BorderSizePixel=0,
-    Font=Enum.Font.Gotham,Text="Dipilih: belum ada",
-    TextColor3=Color3.fromRGB(220,220,230),TextSize=10,
+    Font=Enum.Font.Gotham,Text="Objek dipilih: belum ada",
+    TextColor3=Color3.fromRGB(220,220,230),TextSize=9,
     TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left
 },panel)
-corner(selected,7)
-
-local status = make("TextLabel",{
+corner(detail,7)
+local status=make("TextLabel",{
     Name="Status",BackgroundTransparency=1,
-    Position=UDim2.fromOffset(14,371),Size=UDim2.new(1,-28,0,38),
-    Font=Enum.Font.Gotham,Text="STATUS: Siap scan",
+    Position=UDim2.fromOffset(14,439),Size=UDim2.new(1,-28,0,22),
+    Font=Enum.Font.Gotham,Text="STATUS: Siap",
     TextColor3=Color3.fromRGB(220,190,105),TextSize=10,
-    TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,
-    TextYAlignment=Enum.TextYAlignment.Top
+    TextXAlignment=Enum.TextXAlignment.Left
 },panel)
 
+local records={}
 local function setStatus(msg,color)
     status.Text="STATUS: "..msg
     status.TextColor3=color or Color3.fromRGB(220,190,105)
 end
-
-local function metadataOf(obj)
-    local values={}
+local function metadata(obj)
+    local out={}
     local ok,attrs=pcall(function() return obj:GetAttributes() end)
     if ok then
-        for key,value in pairs(attrs) do
-            local k=string.lower(tostring(key))
-            if string.find(k,"id") or string.find(k,"block")
-                or string.find(k,"tile") or string.find(k,"item") then
-                if type(value)=="string" or type(value)=="number" then
-                    table.insert(values,tostring(key).."="..tostring(value))
+        for k,v in pairs(attrs) do
+            local key=string.lower(tostring(k))
+            if string.find(key,"id") or string.find(key,"block")
+                or string.find(key,"tile") or string.find(key,"item") then
+                if type(v)=="string" or type(v)=="number" then
+                    table.insert(out,tostring(k).."="..tostring(v))
                 end
             end
         end
     end
     for _,child in ipairs(obj:GetChildren()) do
         if child:IsA("ValueBase") then
-            local k=string.lower(child.Name)
-            if string.find(k,"id") or string.find(k,"block")
-                or string.find(k,"tile") or string.find(k,"item") then
-                table.insert(values,child.Name.."="..tostring(child.Value))
+            local key=string.lower(child.Name)
+            if string.find(key,"id") or string.find(key,"block")
+                or string.find(key,"tile") or string.find(key,"item") then
+                table.insert(out,child.Name.."="..tostring(child.Value))
             end
         end
     end
-    return table.concat(values,", ")
+    return table.concat(out,", ")
 end
 
-local function clearRows()
+local function clearList()
     for _,child in ipairs(list:GetChildren()) do
         if child:IsA("TextButton") or child.Name=="EmptyMessage" then
             child:Destroy()
@@ -164,89 +173,81 @@ local function clearRows()
     end
 end
 
-local function emptyMessage(msg)
-    make("TextLabel",{
-        Name="EmptyMessage",Size=UDim2.new(1,-14,0,50),
-        BackgroundTransparency=1,Font=Enum.Font.Gotham,
-        Text=msg,TextColor3=Color3.fromRGB(150,150,165),
-        TextSize=11,TextWrapped=true
-    },list)
-end
-
-local busy=false
-local function scanWorld()
-    if busy then return end
-    busy=true
-    scan.Text="SCANNING..."
-    clearRows()
-
-    local found,seen={},{}
-    local checked=0
-    for _,obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") then
-            checked=checked+1
-            local meta=metadataOf(obj)
-            if meta~="" then
-                local key=obj:GetFullName().."|"..meta
-                if not seen[key] then
-                    seen[key]=true
-                    local pos="pos: -"
-                    if obj:IsA("BasePart") then
-                        local p=obj.Position
-                        pos=string.format("pos: %.0f, %.0f, %.0f",p.X,p.Y,p.Z)
-                    else
-                        local ok,pivot=pcall(function() return obj:GetPivot() end)
-                        if ok then
-                            local p=pivot.Position
-                            pos=string.format("pos: %.0f, %.0f, %.0f",p.X,p.Y,p.Z)
-                        end
-                    end
-                    table.insert(found,{
-                        name=obj.Name,meta=meta,path=obj:GetFullName(),pos=pos
-                    })
-                end
-            end
-        end
-    end
-
-    table.sort(found,function(a,b)
-        return string.lower(a.name)<string.lower(b.name)
-    end)
-
-    if #found==0 then
-        emptyMessage("Tidak ditemukan metadata Attribute/Value bernama ID, Block, Tile, atau Item. Format data game belum terdeteksi.")
-    else
-        for i,record in ipairs(found) do
+local function render()
+    clearList()
+    local q=string.lower(filter.Text or "")
+    local shown=0
+    for _,r in ipairs(records) do
+        local hay=string.lower(r.name.." "..r.class.." "..r.path.." "..r.meta)
+        if q=="" or string.find(hay,q,1,true) then
+            shown=shown+1
+            local labelText="["..r.class.."] "..r.name
+            if r.meta~="" then labelText=labelText.." | "..r.meta end
             local row=make("TextButton",{
-                Name="BlockEntry",Size=UDim2.new(1,-2,0,42),
+                Name="ExplorerEntry",Size=UDim2.new(1,-2,0,38),
                 BackgroundColor3=Color3.fromRGB(40,40,53),BorderSizePixel=0,
-                Font=Enum.Font.Gotham,
-                Text=record.name.." | "..record.meta,
-                TextColor3=Color3.fromRGB(230,230,240),TextSize=10,
+                Font=Enum.Font.Gotham,Text=labelText,
+                TextColor3=Color3.fromRGB(230,230,240),TextSize=9,
                 TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,
-                LayoutOrder=i
+                LayoutOrder=shown
             },list)
             corner(row,6)
             row.MouseButton1Click:Connect(function()
-                selected.Text="Dipilih: "..record.name.." | "..record.meta.."\n"..record.pos
-                setStatus("Kandidat dipilih; ID berasal dari metadata lokal.")
+                detail.Text="["..r.class.."] "..r.path
+                setStatus("Objek dipilih. ModuleScript tidak dieksekusi atau didecompile.")
             end)
         end
     end
-
+    if shown==0 then
+        make("TextLabel",{
+            Name="EmptyMessage",Size=UDim2.new(1,-14,0,42),
+            BackgroundTransparency=1,Font=Enum.Font.Gotham,
+            Text="Tidak ada hasil untuk filter ini.",
+            TextColor3=Color3.fromRGB(150,150,165),TextSize=11,
+            TextWrapped=true
+        },list)
+    end
     task.wait()
     list.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+14)
-    info.Text=tostring(#found).." kandidat / "..tostring(checked).." objek diperiksa"
-    scan.Text="SCAN BLOCK"
-    busy=false
-    if #found>0 then
-        setStatus("Scan selesai. Periksa kandidat.")
-    else
-        setStatus("Scan selesai; metadata ID tidak ditemukan.",Color3.fromRGB(255,170,110))
-    end
+    info.Text=tostring(shown).." ditampilkan dari "..tostring(#records).." objek"
 end
 
-scan.MouseButton1Click:Connect(scanWorld)
+local busy=false
+local function scanRoot(root)
+    if busy then return end
+    busy=true
+    wsBtn.Text="SCAN WORKSPACE"
+    rsBtn.Text="SCAN REPLICATED"
+    clearList()
+    records={}
+    setStatus("Memindai "..root.Name.."...")
+    local ok,desc=pcall(function() return root:GetDescendants() end)
+    if not ok then
+        busy=false
+        setStatus("Gagal membaca "..root.Name,Color3.fromRGB(255,150,110))
+        return
+    end
+    local cap=2500
+    for i,obj in ipairs(desc) do
+        if i>cap then break end
+        local meta=metadata(obj)
+        table.insert(records,{
+            name=obj.Name,class=obj.ClassName,path=obj:GetFullName(),meta=meta
+        })
+    end
+    render()
+    setStatus("Selesai: "..tostring(math.min(#desc,cap)).." objek diperiksa")
+    if #desc>cap then
+        setStatus("Dibatasi "..cap.." objek; gunakan filter untuk menelusuri hasil.")
+    end
+    busy=false
+end
+
+wsBtn.MouseButton1Click:Connect(function() scanRoot(Workspace) end)
+rsBtn.MouseButton1Click:Connect(function() scanRoot(ReplicatedStorage) end)
+filter:GetPropertyChangedSignal("Text"):Connect(function()
+    if #records>0 then render() end
+end)
 close.MouseButton1Click:Connect(function() gui:Destroy() end)
 
 local dragging,dragStart,startPos
@@ -268,4 +269,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("BILL AUTO BREAKER passive scanner loaded.")
+print("BILL AUTO BREAKER Explorer loaded.")
